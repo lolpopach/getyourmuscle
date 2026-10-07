@@ -2387,7 +2387,22 @@ function bodyDeadline(req) {
   req.allowSlowBody = clear;
 }
 
+// Cloudflare Worker in front (cloudflare/worker.js): the visitor's address reaches this API in
+// X-Opengym-Client-Ip, and only a request carrying PROXY_SECRET may say so. With PROXY_SECRET set,
+// every other forwarding header is discarded first so a direct hit cannot pick its own address.
+const PROXY_SECRET = process.env.PROXY_SECRET || '';
+function applyProxySecret(req) {
+  if (!PROXY_SECRET) return;
+  const given = String(req.headers['x-opengym-proxy-secret'] || '');
+  const a = Buffer.from(given), b = Buffer.from(PROXY_SECRET);
+  const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
+  const ip = String(req.headers['x-opengym-client-ip'] || '').trim();
+  for (const h of ['cf-connecting-ip', 'x-forwarded-for', 'x-real-ip']) delete req.headers[h];
+  if (ok && ip) req.headers['cf-connecting-ip'] = ip;
+}
+
 const server = http.createServer(async (req, res) => {
+  applyProxySecret(req);
   bodyDeadline(req);
   // Same-origin (the deployed nginx-proxied web app) never triggers CORS, so this only matters
   // for the paired mobile app calling in from its own WebView origin. It carries no cookie

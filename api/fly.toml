@@ -1,0 +1,39 @@
+# Deploy from this directory:  cd api && fly deploy --remote-only
+# --remote-only builds the image on Fly's builders, so Docker is not needed locally.
+app = "getyourmuscle-api"
+primary_region = "nrt"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "3000"
+  DATA_DIR = "/data"
+  TRUST_PROXY = "1"
+  # Must match the public hostname the Worker is served from — passkeys are bound to it.
+  RP_ID = "getyourmuscle.example.workers.dev"
+  ORIGIN = "https://getyourmuscle.example.workers.dev"
+  RP_NAME = "GetYourMuscle"
+
+# Users, passkeys and workout data live in ./data, so they need a volume. A volume belongs to
+# one machine: keep this app at a single machine.
+[mounts]
+  source = "gym_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  [[http_service.checks]]
+    method = "GET"
+    path = "/api/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
