@@ -4,15 +4,20 @@
   "main": "cloudflare/worker.js",
   "compatibility_date": "2025-09-01",
   "workers_dev": true,
+  // Cloudflare's Git builds (and `wrangler deploy` anywhere) build the app first, so the assets
+  // directory exists even when only the deploy command is configured.
+  "build": {
+    "command": "cd frontend && npm ci --ignore-scripts --no-audit --no-fund && npm run build:cloudflare"
+  },
   "assets": {
     "directory": "./frontend/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
-  "vars": {
-    // Public URL of the Fly.io API (fly.toml app name + .fly.dev); scripts/deploy-cloud.sh
-    // passes the real one with --var. PROXY_SECRET is a secret (`wrangler secret put`).
-    "API_ORIGIN": "https://getyourmuscle-api.fly.dev"
-  }
+  // API_ORIGIN (the Fly.io API, e.g. https://<app>.fly.dev) and PROXY_SECRET are set on the
+  // Worker itself — in the dashboard (Settings → Variables and Secrets) or by
+  // scripts/deploy-cloud.sh — and kept across Git deploys. Until API_ORIGIN is set, /api answers
+  // 503 and the app runs in guest mode.
+  "keep_vars": true
 }

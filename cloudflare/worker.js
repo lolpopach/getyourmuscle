@@ -4,6 +4,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
+    if (!env.API_ORIGIN) return Response.json({ error: 'API not configured' }, { status: 503 });
 
     const target = new URL(url.pathname + url.search, env.API_ORIGIN);
     const headers = new Headers(request.headers);
