@@ -11,6 +11,7 @@ primary_region = "nrt"
   DATA_DIR = "/data"
   TRUST_PROXY = "1"
   RP_NAME = "GetYourMuscle"
+  DEFAULT_LANG = "ko"
   # RP_ID, ORIGIN and PROXY_SECRET are Fly secrets, set by scripts/deploy-cloud.sh: RP_ID and
   # ORIGIN must match the hostname the Worker is served from, since passkeys are bound to it.
 
