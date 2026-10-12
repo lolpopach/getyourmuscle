@@ -26,7 +26,7 @@ const PLAN_UNITS = new Set(['kg', 'lb'])
 // A plan's numbers are in the unit that wrote it. Missing unit is deliberately legacy-compatible:
 // old files were read as already being in the recipient's unit, so keep their values unchanged.
 const planUnit = value => value === 'lbs' ? 'lb' : PLAN_UNITS.has(value) ? value : null
-const unitError = () => { throw new Error(t('this isn’t an openGym plan file')) }
+const unitError = () => { throw new Error(t('this isn’t an G-PLAN plan file')) }
 
 function declaredPlanUnit(data) {
   let declared = null
@@ -202,7 +202,7 @@ export function parsePlan(raw, destinationUnit = 'kg') {
   const data = typeof raw === 'string' ? JSON.parse(raw) : raw
   const destination = planUnit(destinationUnit)
   if (!data || typeof data !== 'object' || Array.isArray(data) || !data.opengym_plan || !Array.isArray(data.routines) || !destination) {
-    throw new Error(t('this isn’t an openGym plan file'))
+    throw new Error(t('this isn’t an G-PLAN plan file'))
   }
   const sourceUnit = declaredPlanUnit(data)
   const customEx = (Array.isArray(data.customEx) ? data.customEx : []).filter(c => c && c.id)
@@ -437,13 +437,13 @@ export function planPrintHTML(S, owner, { routineId } = {}) {
 </style></head>
 <body><div class="doc">
   <header>
-    <div class="kicker">openGym</div>
+    <div class="kicker">G-PLAN</div>
     <h1>${esc(title)}</h1>
     ${sub ? `<div class="sub">${sub}</div>` : ''}
   </header>
   ${week}
   ${body}
-  <footer>${esc(t('Made with openGym'))} · opengym.duarte-santos.ch</footer>
+  <footer>${esc(t('Made with G-PLAN'))}</footer>
 </div></body></html>`
 }
 

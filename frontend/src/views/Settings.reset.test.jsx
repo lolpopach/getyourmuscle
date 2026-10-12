@@ -154,9 +154,10 @@ describe('Settings — reset everything', () => {
 })
 
 describe('Settings — footer', () => {
-  it('links the source code to its home on GitHub', () => {
+  it('links this fork’s source code, and the openGym project it is based on', () => {
     mount()
-    const link = [...host.querySelectorAll('a')].find(a => a.textContent === 'source code')
-    expect(link.getAttribute('href')).toBe('https://github.com/DuarteSantos8/openGym')
+    const link = text => [...host.querySelectorAll('a')].find(a => a.textContent === text)
+    expect(link('source code').getAttribute('href')).toBe('https://github.com/lolpopach/getyourmuscle')
+    expect(link('openGym').getAttribute('href')).toBe('https://github.com/DuarteSantos8/openGym')
   })
 })
