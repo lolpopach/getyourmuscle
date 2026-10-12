@@ -135,6 +135,10 @@ tags:
     description: >-
       More than one passkey on a profile: list, add, rename, remove — and one-time device
       links, which let another device of the same person add a passkey of its own.
+  - name: health
+    description: >-
+      Apple Health sync through an iOS Shortcut. The signed-in app issues a write-only token;
+      the Shortcut posts the day's distance, steps, active energy, weight and body fat with it.
   - name: data
     description: Per-user state sync (the whole app state as one JSON blob)
   - name: push
@@ -1289,6 +1293,143 @@ paths:
         '409': { $ref: '#/components/responses/PasskeyLimit' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/Busy' }
+
+  /api/account/health-token:
+    get:
+      tags: [health]
+      operationId: getHealthToken
+      summary: Whether an Apple Health sync token exists, and when the last sync came in
+      responses:
+        '200':
+          description: The token's state. The token itself is never returned again.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  active: { type: boolean }
+                  created: { type: number, nullable: true, description: When the token was issued (ms). }
+                  lastSync: { type: number, nullable: true, description: The newest ingest (ms). }
+              example: { active: true, created: 1790000000000, lastSync: 1790050000000 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [health]
+      operationId: issueHealthToken
+      summary: Issue an Apple Health sync token
+      description: |
+        Returns a new token (`gymh_…`) once, replacing the profile's previous one. It is stored
+        only as a SHA-256 and can do one thing: `POST /api/health/ingest`. It is not a session
+        and reads nothing back. Audited as `auth.health.issue`.
+      responses:
+        '200':
+          description: The token, once.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  created: { type: number }
+              example: { token: "gymh_3q2-7wEvrF0bS6b1m0eW0tjV3T7sNnH6Yy2rVv1n9oQ", created: 1790000000000 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    delete:
+      tags: [health]
+      operationId: revokeHealthToken
+      summary: Revoke the Apple Health sync token
+      description: The Shortcut's next sync is refused. Audited as `auth.health.revoke`.
+      responses:
+        '200':
+          description: Revoked (or there was none).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  active: { type: boolean, enum: [false] }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/health/ingest:
+    post:
+      tags: [health]
+      operationId: healthIngest
+      summary: One day's numbers from Apple Health (sent by the iOS Shortcut)
+      description: |
+        Authenticated with the health token as `Authorization: Bearer gymh_…`, not a session.
+        The Shortcut sends the day's running totals, so a later sync for the same date
+        replaces the fields it carries and keeps the others. Numbers may be sent as JSON
+        numbers or as numeric strings (a decimal comma is accepted). `bodyFat` may be a
+        percentage or the 0–1 fraction Health stores. The date must be within the last 31
+        days. A wrong token counts against the address like a wrong device-link code.
+      security:
+        - healthToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [date]
+              properties:
+                date: { type: string, format: date }
+                dist: { type: number, description: Walking + running distance. }
+                unit: { type: string, enum: [km, m, mi], default: km }
+                steps: { type: number }
+                activeKcal: { type: number }
+                weight: { type: number, description: kg }
+                bodyFat: { type: number, description: '% (or a 0–1 fraction)' }
+            example: { date: "2026-10-13", dist: 7.84, unit: km, steps: 10312, activeKcal: 612 }
+      responses:
+        '200':
+          description: Saved. `saved` is the whole day as now stored.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  date: { type: string }
+                  saved: { $ref: '#/components/schemas/HealthDay' }
+        '400':
+          description: A field is missing, not a number, or out of range.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: No token, or one that is wrong, revoked or belongs to a disabled account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/health/daily:
+    get:
+      tags: [health]
+      operationId: healthDaily
+      summary: The synced days, for the app to merge into its checklist and progress views
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Only days on or after this one.
+      responses:
+        '200':
+          description: Days keyed by date (the newest 400 are kept).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  days:
+                    type: object
+                    additionalProperties: { $ref: '#/components/schemas/HealthDay' }
+              example: { days: { "2026-10-13": { distKm: 7.84, steps: 10312, activeKcal: 612, at: 1790050000000 } } }
+        '400':
+          description: '`from` is not YYYY-MM-DD.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
   /api/device-link/options:
     post:
@@ -2871,6 +3012,12 @@ components:
         The same signed session token, carried as `Authorization: Bearer <token>` by
         the paired mobile app (obtained from `POST /api/pair/redeem`). Bearer requests
         skip the CSRF origin check — a browser never attaches this header on its own.
+    healthToken:
+      type: http
+      scheme: bearer
+      description: >-
+        The write-only Apple Health sync token (`gymh_…`) from `POST /api/account/health-token`,
+        carried by the iOS Shortcut. Good for `POST /api/health/ingest` only.
 
   responses:
     Unauthorized:
@@ -2992,6 +3139,16 @@ components:
           example: { error: "that code is wrong, used or expired", code: "link-invalid" }
 
   schemas:
+    HealthDay:
+      type: object
+      description: One day synced from Apple Health. Every value is optional.
+      properties:
+        distKm: { type: number, description: Walking + running distance (km). }
+        steps: { type: integer }
+        activeKcal: { type: integer }
+        weight: { type: number, description: kg }
+        bodyFat: { type: number, description: '%' }
+        at: { type: number, description: When this day was last written (ms). }
     Error:
       type: object
       required: [error]

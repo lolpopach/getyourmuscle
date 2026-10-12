@@ -31,6 +31,7 @@ import {
 } from './passkeys-store.js';
 import { createDeviceLink, findDeviceLink, burnDeviceLink, dropDeviceLinks } from './device-link.js';
 import { createMediaStore, mediaLimits, mediaConfig, MediaError, HASH_RE } from './media.js';
+import { issueHealthToken, revokeHealthToken, findHealthUser, parseIngest, mergeIngest, daysFrom } from './health.js';
 
 const PORT = +(process.env.PORT || 3000);
 const DATA = process.env.DATA_DIR || '/data';
@@ -124,6 +125,12 @@ function notePull(user, now = Date.now()) {
 const lastSyncOf = (u, S) => Math.max(S?._ts || 0, u?.lastPull || 0) || null;
 function readState(uid) {
   try { return JSON.parse(fs.readFileSync(stateFile(uid), 'utf8')); } catch { return null; }
+}
+// What an iOS Shortcut sent from Apple Health (health.js). Kept apart from the state document so
+// a sync from the phone never races the app's own PUT /api/data.
+const healthFile = uid => path.join(DATA, 'health-' + uid.replace(/[^a-zA-Z0-9_-]/g, '') + '.json');
+function readHealth(uid) {
+  try { return JSON.parse(fs.readFileSync(healthFile(uid), 'utf8')); } catch { return { days: {} }; }
 }
 // An entry is an object a reader can dereference, and `records` is every entry of a stored
 // list. PUT /api/data drops the rest on the way in — a null workout, a routine that is a
@@ -814,7 +821,9 @@ const ACCOUNT_FAILS = createBackoff({
   // At most one per profile with a password, so this cannot grow without bound.
   keep: k => k.startsWith('acct:') && hasPassword(db.users.find(u => u.id === k.slice(5)))
 });
-setInterval(() => { AUTH_BURST.sweep(); ADDR_FAILS.sweep(); ACCOUNT_FAILS.sweep(); }, 60000).unref();
+// Apple Health syncs per profile: a Shortcut runs once or twice a day, so this only stops a loop.
+const HEALTH_WRITES = createWindow({ max: 60, windowMs: 3600000 });
+setInterval(() => { AUTH_BURST.sweep(); ADDR_FAILS.sweep(); ACCOUNT_FAILS.sweep(); HEALTH_WRITES.sweep(); }, 60000).unref();
 
 // Route -> the kind of failure it can count. Every route listed here also spends the burst
 // budget; `null` spends only that.
@@ -829,7 +838,9 @@ const THROTTLED = {
   // budget: the password that may prove them counts its own failures (passwordAttempt).
   'POST /api/device-link/options': 'link', 'POST /api/device-link/verify': 'link',
   'POST /api/account/passkeys/options': null, 'POST /api/account/device-link': null,
-  'DELETE /api/account/passkeys': null
+  'DELETE /api/account/passkeys': null,
+  // A wrong Apple Health token counts against the address like a wrong device-link code.
+  'POST /api/health/ingest': 'health'
 };
 
 // Which address the throttle counts against. Unlike clientIp() above, which only labels a log
@@ -2072,6 +2083,49 @@ const routes = {
     json(res, 200, { ok: true, ts: body.state._ts || null, rev: body.state._rev });
   },
 
+  /* ---------- Apple Health sync (health.js) ----------
+     The signed-in app issues and revokes the token and reads the days back; the iOS Shortcut
+     holds the token and can only write. */
+  'GET /api/account/health-token': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    const days = Object.values(readHealth(user.id).days || {});
+    const lastSync = days.reduce((m, d) => Math.max(m, +d?.at || 0), 0) || null;
+    json(res, 200, { active: !!user.healthTok, created: user.healthTok?.created || null, lastSync });
+  },
+  'POST /api/account/health-token': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    const token = issueHealthToken(user);
+    saveDb();
+    audit(req, 'auth.health.issue', { user });
+    json(res, 200, { token, created: user.healthTok.created });
+  },
+  'DELETE /api/account/health-token': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    if (revokeHealthToken(user)) { saveDb(); audit(req, 'auth.health.revoke', { user }); }
+    json(res, 200, { active: false });
+  },
+  'POST /api/health/ingest': async (req, res) => {
+    const auth = req.headers.authorization || '';
+    const user = auth.startsWith('Bearer ') ? findHealthUser(db.users, auth.slice(7).trim()) : null;
+    if (!user) { strikeAddress(req, 'health'); return json(res, 401, { error: 'invalid token' }); }
+    const wait = HEALTH_WRITES.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const p = parseIngest(await readBody(req));
+    if (p.error) return json(res, 400, { error: p.error });
+    const doc = mergeIngest(readHealth(user.id), p.date, p.values);
+    atomicWrite(healthFile(user.id), JSON.stringify(doc), 0o600);
+    json(res, 200, { ok: true, date: p.date, saved: doc.days[p.date] });
+  },
+  'GET /api/health/daily': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    const from = new URL(req.url, 'http://x').searchParams.get('from') || '';
+    if (from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) return json(res, 400, { error: 'from must be YYYY-MM-DD' });
+    json(res, 200, { days: daysFrom(readHealth(user.id), from) });
+  },
   'GET /api/push/public-key': async (req, res) => json(res, 200, { key: vapid.publicKey }),
 
   'POST /api/push/subscribe': async (req, res) => {
@@ -2254,6 +2308,7 @@ const routes = {
     presence.delete(u.id);
     // The training history and any Coach credential of theirs, both outside db.json.
     try { fs.unlinkSync(stateFile(u.id)); } catch { /* already gone */ }
+    try { fs.unlinkSync(healthFile(u.id)); } catch { /* never synced */ }
     try { coachConfig.clearProfileAuth(u.id); } catch { /* nothing stored */ }
     // Their photos and videos — the one place a profile's folder under uploads/ is removed.
     try { MEDIA.removeUser(u.id); } catch (e) { console.error('media: could not remove uploads of', u.id, e.message); }
