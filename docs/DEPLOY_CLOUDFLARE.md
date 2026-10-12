@@ -12,6 +12,19 @@ No local Docker is needed: Fly builds the image remotely.
 Exercise images/GIFs come from the jsDelivr CDN (`npm run build:cloudflare`), so they are not
 bundled or hosted by you.
 
+## One command
+
+With `FLY_API_TOKEN`, `CLOUDFLARE_API_TOKEN` (the "Edit Cloudflare Workers" template) and
+`CLOUDFLARE_ACCOUNT_ID` in the environment:
+
+```bash
+scripts/deploy-cloud.sh            # DRY_RUN=1 prints the steps instead
+```
+
+It creates the Fly app and volume when missing, sets `RP_ID`/`ORIGIN` to the Worker's
+`workers.dev` host (or `APP_HOST`), shares a fresh `PROXY_SECRET` between both sides, deploys the
+API, builds the app and deploys the Worker. The manual steps below do the same by hand.
+
 ## 1. API on Fly.io
 
 ```bash
@@ -22,8 +35,8 @@ fly volumes create gym_data --size 1 --region nrt
 fly secrets set PROXY_SECRET=$(openssl rand -hex 32)         # remember this value
 ```
 
-Edit `api/fly.toml`: set `RP_ID` and `ORIGIN` to the **final public hostname** of the Worker
-(e.g. `gym.example.com`, or `<name>.<account>.workers.dev`). Passkeys are bound to this host, so
+Set `RP_ID` and `ORIGIN` to the **final public hostname** of the Worker (e.g. `gym.example.com`,
+or `<name>.<account>.workers.dev`): `fly secrets set RP_ID=<host> ORIGIN=https://<host>`. Passkeys are bound to this host, so
 changing it later invalidates registered passkeys. Then:
 
 ```bash

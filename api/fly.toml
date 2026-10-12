@@ -1,4 +1,4 @@
-# Deploy from this directory:  cd api && fly deploy --remote-only
+# Deployed by scripts/deploy-cloud.sh (or by hand: cd api && fly deploy --remote-only).
 # --remote-only builds the image on Fly's builders, so Docker is not needed locally.
 app = "getyourmuscle-api"
 primary_region = "nrt"
@@ -10,10 +10,9 @@ primary_region = "nrt"
   PORT = "3000"
   DATA_DIR = "/data"
   TRUST_PROXY = "1"
-  # Must match the public hostname the Worker is served from — passkeys are bound to it.
-  RP_ID = "getyourmuscle.example.workers.dev"
-  ORIGIN = "https://getyourmuscle.example.workers.dev"
   RP_NAME = "GetYourMuscle"
+  # RP_ID, ORIGIN and PROXY_SECRET are Fly secrets, set by scripts/deploy-cloud.sh: RP_ID and
+  # ORIGIN must match the hostname the Worker is served from, since passkeys are bound to it.
 
 # Users, passkeys and workout data live in ./data, so they need a volume. A volume belongs to
 # one machine: keep this app at a single machine.
