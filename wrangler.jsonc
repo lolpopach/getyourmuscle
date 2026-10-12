@@ -4,8 +4,9 @@
   "main": "cloudflare/worker.js",
   "compatibility_date": "2025-09-01",
   "workers_dev": true,
-  // Cloudflare's Git builds (and `wrangler deploy` anywhere) build the app first, so the assets
-  // directory exists even when only the deploy command is configured.
+  // `wrangler deploy` from a shell builds the app first. Cloudflare's Git builds (Workers Builds)
+  // ignore this block, so there the same command is the dashboard's Build command
+  // (docs/DEPLOY_CLOUDFLARE.md).
   "build": {
     "command": "cd frontend && npm ci --ignore-scripts --no-audit --no-fund && npm run build:cloudflare"
   },

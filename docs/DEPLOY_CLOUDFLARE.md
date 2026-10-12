@@ -25,6 +25,19 @@ It creates the Fly app and volume when missing, sets `RP_ID`/`ORIGIN` to the Wor
 `workers.dev` host (or `APP_HOST`), shares a fresh `PROXY_SECRET` between both sides, deploys the
 API, builds the app and deploys the Worker. The manual steps below do the same by hand.
 
+## Deploying on every push (Cloudflare Git builds)
+
+The Worker can be connected to this repository (Workers & Pages → the Worker → Settings → Build).
+Workers Builds does not run the `build` block of `wrangler.jsonc`, so set it there by hand:
+
+- **Build command:** `cd frontend && npm ci && npm run build:cloudflare`
+- **Deploy command:** `npx wrangler deploy` (the default)
+
+Without the build command the deploy fails with *The directory specified by the "assets.directory"
+field … does not exist*. Runtime values (`API_ORIGIN`, `PROXY_SECRET`) live under the Worker's
+Settings → Variables and Secrets and survive these deploys (`keep_vars`). The deploy tokens
+(`FLY_API_TOKEN`, `CLOUDFLARE_API_TOKEN`) do not belong there: the Worker never uses them.
+
 ## 1. API on Fly.io
 
 ```bash
