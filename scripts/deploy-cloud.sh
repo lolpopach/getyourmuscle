@@ -7,7 +7,7 @@
 #   CLOUDFLARE_API_TOKEN   Cloudflare token from the "Edit Cloudflare Workers" template
 #   CLOUDFLARE_ACCOUNT_ID  the Cloudflare account to deploy into
 # Optional:
-#   FLY_APP     Fly app name, globally unique   (default getyourmuscle-api)
+#   FLY_APP     Fly app name, globally unique   (default gplan-api-lolpopach)
 #   FLY_ORG     Fly organisation                (default personal)
 #   FLY_REGION  Fly region                      (default nrt, Tokyo)
 #   APP_HOST    public hostname of the app, for a custom domain. Default: the Worker's own
@@ -16,7 +16,7 @@
 #   DRY_RUN=1   print the commands instead of running them
 set -euo pipefail
 
-FLY_APP=${FLY_APP:-getyourmuscle-api}
+FLY_APP=${FLY_APP:-gplan-api-lolpopach}
 FLY_ORG=${FLY_ORG:-personal}
 FLY_REGION=${FLY_REGION:-nrt}
 WORKER=getyourmuscle

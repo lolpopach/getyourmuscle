@@ -25,6 +25,19 @@ It creates the Fly app and volume when missing, sets `RP_ID`/`ORIGIN` to the Wor
 `workers.dev` host (or `APP_HOST`), shares a fresh `PROXY_SECRET` between both sides, deploys the
 API, builds the app and deploys the Worker. The manual steps below do the same by hand.
 
+## Deploying from GitHub (recommended)
+
+Both halves deploy on push, with no tokens on your own machine:
+
+- **API → Fly.io:** `.github/workflows/deploy-api.yml`. Add the repository secret `FLY_API_TOKEN`
+  (a Fly.io *org* token; GitHub → Settings → Secrets and variables → Actions) and set `APP_HOST`
+  to the Worker's hostname (repository variable, or the default in the workflow). The first run
+  creates the Fly app (`gplan-api-lolpopach` unless the `FLY_APP` variable says otherwise) and its
+  volume. Run it by hand for `wipe-probe` (remove an `e2e-probe` test profile while it is the
+  only one) and `lock-signups` (make an account admin and turn on `INVITE_ONLY`).
+- **App + /api proxy → Cloudflare:** the Worker's Git integration, below. Set the Worker's
+  runtime variable `API_ORIGIN` to `https://<fly app>.fly.dev`.
+
 ## Deploying on every push (Cloudflare Git builds)
 
 The Worker can be connected to this repository (Workers & Pages → the Worker → Settings → Build).

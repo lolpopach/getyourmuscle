@@ -1,6 +1,6 @@
 # Deployed by scripts/deploy-cloud.sh (or by hand: cd api && fly deploy --remote-only).
 # --remote-only builds the image on Fly's builders, so Docker is not needed locally.
-app = "getyourmuscle-api"
+app = "gplan-api-lolpopach"
 primary_region = "nrt"
 
 [build]

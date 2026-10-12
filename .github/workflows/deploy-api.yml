@@ -1,0 +1,103 @@
+# Deploys the API (api/) to Fly.io. The app and the /api proxy are deployed separately, by
+# Cloudflare's Git integration (docs/DEPLOY_CLOUDFLARE.md).
+#
+# Needs the repository secret FLY_API_TOKEN (a Fly.io *org* token, so it can create the app on the
+# first run). APP_HOST is the hostname the Worker serves the app on: passkeys are bound to it.
+#
+# Run by hand (Actions → Deploy API → Run workflow) for the two one-off jobs:
+#   wipe-probe     removes the data of a test sign-up named e2e-probe, only while it is the only
+#                  profile on the server
+#   lock-signups   makes `admin_uid` the admin and turns on INVITE_ONLY, after the owner signed up
+name: Deploy API
+
+on:
+  push:
+    branches: [claude/eloquent-dijkstra-bu8u7v]
+    paths: ['api/**', '.github/workflows/deploy-api.yml']
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do
+        type: choice
+        options: [deploy, wipe-probe, lock-signups]
+        default: deploy
+      admin_uid:
+        description: Account ID to make admin (lock-signups)
+        required: false
+
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+  FLY_APP: ${{ vars.FLY_APP || 'gplan-api-lolpopach' }}
+  FLY_REGION: nrt
+  APP_HOST: ${{ vars.APP_HOST || '' }}
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # A push before FLY_API_TOKEN and APP_HOST exist is skipped with a notice; a run by hand fails.
+      - name: Check the configuration
+        id: check
+        run: |
+          missing=""
+          [ -n "$FLY_API_TOKEN" ] || missing="the repository secret FLY_API_TOKEN (Settings → Secrets and variables → Actions)"
+          [ -n "$APP_HOST" ] || missing="${missing:+$missing and }APP_HOST (the Worker's hostname: repository variable APP_HOST, or the default in this file)"
+          if [ -n "$missing" ]; then
+            if [ "${{ github.event_name }}" = push ]; then echo "::notice::Not deployed yet — add $missing."; echo "ready=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+            echo "::error::Add $missing."; exit 1
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+          echo "API https://$FLY_APP.fly.dev for https://$APP_HOST"
+
+      - name: Create the app and its volume if missing
+        if: steps.check.outputs.ready == 'true' && (github.event_name == 'push' || inputs.action == 'deploy')
+        run: |
+          flyctl status --app "$FLY_APP" >/dev/null 2>&1 || flyctl apps create "$FLY_APP" --org personal
+          flyctl volumes list --app "$FLY_APP" | grep -q gym_data \
+            || flyctl volumes create gym_data --app "$FLY_APP" --region "$FLY_REGION" --size 1 --yes
+
+      - name: Deploy
+        if: steps.check.outputs.ready == 'true' && (github.event_name == 'push' || inputs.action == 'deploy')
+        working-directory: api
+        run: |
+          flyctl secrets set --app "$FLY_APP" --stage RP_ID="$APP_HOST" ORIGIN="https://$APP_HOST"
+          flyctl deploy --app "$FLY_APP" --primary-region "$FLY_REGION" --remote-only --ha=false
+          curl -fsS --retry 6 --retry-delay 5 --retry-all-errors "https://$FLY_APP.fly.dev/api/health"
+
+      - name: Remove the e2e-probe test profile
+        if: inputs.action == 'wipe-probe'
+        run: |
+          # Shipped as base64 so no quoting survives two shells and an SSH hop.
+          script=$(base64 -w0 <<'JS'
+          const fs = require('fs'), path = require('path'), D = '/data';
+          const db = JSON.parse(fs.readFileSync(path.join(D, 'db.json'), 'utf8'));
+          const names = (db.users || []).map(u => u.name);
+          if (names.length !== 1 || names[0] !== 'e2e-probe') { console.log('refusing, profiles:', JSON.stringify(names)); process.exit(1); }
+          for (const f of fs.readdirSync(D)) if (f === 'db.json' || f === 'audit.log' || /^(state|health)-.*\.json$/.test(f)) fs.rmSync(path.join(D, f));
+          console.log('removed the e2e-probe profile');
+          JS
+          )
+          flyctl ssh console --app "$FLY_APP" -C "node -e \"eval(Buffer.from('$script','base64').toString())\""
+          flyctl apps restart "$FLY_APP"
+          sleep 10
+          curl -fsS --retry 6 --retry-delay 5 --retry-all-errors "https://$FLY_APP.fly.dev/api/health"
+
+      - name: Make the owner admin and close sign-ups
+        if: inputs.action == 'lock-signups'
+        env:
+          ADMIN_UID: ${{ inputs.admin_uid }}
+        run: |
+          [ -n "$ADMIN_UID" ] || { echo "::error::admin_uid is required"; exit 1; }
+          flyctl secrets set --app "$FLY_APP" ADMIN_UIDS="$ADMIN_UID" INVITE_ONLY=1
+          curl -fsS --retry 6 --retry-delay 5 --retry-all-errors "https://$FLY_APP.fly.dev/api/health"
