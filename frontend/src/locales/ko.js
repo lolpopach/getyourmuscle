@@ -1663,6 +1663,9 @@ export default {
   'Teal': '청록',
   'Yellow': '노랑',
   'Enter how long it took — at least 1 minute.': '걸린 시간을 입력하세요 — 최소 1분.',
+  // G-PLAN starter plan (sheets.jsx PLAN_COPY)
+  'G-PLAN Solid Build': 'G-PLAN 다부진 플랜',
+  'Chest and shoulders, back and arms first, two leg days and an optional upper-body volume day.': '가슴 어깨, 등 팔을 먼저 키우고, 하체 2일과 선택 상체 볼륨 데이를 더한 플랜.',
   // Apple Health sync (components/AppleHealth.jsx)
   'Copy address': '주소 복사',
   'Copy token': '토큰 복사',

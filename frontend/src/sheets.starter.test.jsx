@@ -53,8 +53,9 @@ describe('starter plan chooser', () => {
     starterPlanSheet()
     const host = renderTop()
     expect([...host.querySelectorAll('.item .tt')].map(el => el.textContent))
-      .toEqual(['Push / Pull / Legs', 'Upper / Lower', 'Full Body', '5×5'])
+      .toEqual(['G-PLAN Solid Build', 'Push / Pull / Legs', 'Upper / Lower', 'Full Body', '5×5'])
     expect(rowFor(host, 'Upper / Lower').querySelector('.ss').textContent).toContain('4 days per week')
+    expect(rowFor(host, 'G-PLAN Solid Build').querySelector('.ss').textContent).toContain('5 days per week')
   })
 
   it('loads straight away when the plan’s weekdays are free, without asking', () => {

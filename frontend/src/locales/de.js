@@ -1683,6 +1683,9 @@ export default {
   'Teal': 'Türkis',
   'Yellow': 'Gelb',
   'Enter how long it took — at least 1 minute.': 'Gib ein, wie lange es gedauert hat — mindestens 1 Minute.',
+  // G-PLAN starter plan (sheets.jsx PLAN_COPY)
+  'G-PLAN Solid Build': 'G-PLAN Solid Build',
+  'Chest and shoulders, back and arms first, two leg days and an optional upper-body volume day.': 'Chest and shoulders, back and arms first, two leg days and an optional upper-body volume day.',
   // Apple Health sync (components/AppleHealth.jsx) — English until translated
   'Copy address': 'Copy address',
   'Copy token': 'Copy token',

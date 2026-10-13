@@ -32,9 +32,21 @@ const FIVE_BY_FIVE = [
   ['5x5-c', '5×5 C', 'barbell', [['0739', 5, 5], ['0047', 5, 5], ['1323', 5, 5]]]
 ]
 
+// G-PLAN's own plan (docs/dev/GETYOURMUSCLE_PLAN.md §2.4): a lean, solid build — shoulders,
+// upper chest, back and arms first — while cutting slowly. Reps are the top of each range; the
+// double-progression rule adds weight once every set reaches them.
+const GPLAN_SOLID = [
+  ['g-upper-a', '상체 A · 가슴 어깨', 'barbell', [['0314', 4, 10], ['0025', 3, 8], ['0405', 3, 10], ['0334', 4, 15], ['0227', 2, 15], ['0200', 3, 12]]],
+  ['g-lower-a', '하체 A · 스쿼트', 'legs', [['0043', 3, 8], ['0085', 3, 10], ['0739', 2, 12], ['0586', 3, 12], ['0594', 3, 15], ['0472', 3, 12]]],
+  ['g-upper-b', '상체 B · 등 팔', 'pullup', [['2330', 4, 10], ['0027', 3, 10], ['0861', 3, 12], ['0203', 3, 15], ['0178', 3, 15], ['0447', 3, 12], ['0318', 2, 12]]],
+  ['g-lower-b', '하체 B · 레그프레스', 'legs', [['0410', 3, 10], ['0739', 3, 12], ['0586', 3, 12], ['0585', 2, 15], ['0605', 3, 15], ['0175', 3, 15]]],
+  ['g-upper-c', '상체 볼륨 (선택)', 'figureStrength', [['0757', 3, 12], ['2330', 3, 12], ['0334', 4, 15], ['0378', 3, 15], ['0294', 3, 12], ['0200', 3, 12]]]
+]
+
 // [weekday, routineKey] — weekday is a DAYN index, so 1 is Monday. Fixed weeks only: every
 // plan repeats the same seven days, which is all the weekly plan model can represent.
 const PLANS = {
+  'gplan-solid': { routines: GPLAN_SOLID, schedule: [[1, 'g-upper-a'], [2, 'g-lower-a'], [4, 'g-upper-b'], [5, 'g-lower-b'], [6, 'g-upper-c']] },
   ppl: { routines: PPL, schedule: [[1, 'push'], [3, 'pull'], [5, 'legs']] },
   'upper-lower': { routines: UPPER_LOWER, schedule: [[1, 'upper-a'], [2, 'lower-a'], [4, 'upper-b'], [5, 'lower-b']] },
   'full-body': { routines: FULL_BODY, schedule: [[1, 'fb-a'], [3, 'fb-b'], [5, 'fb-c']] },
