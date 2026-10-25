@@ -29,6 +29,8 @@
  *     is the exception: the edit may have taken away the set the kept weight came from, so it
  *     is the best of the merged history and of the editing copy's own, and the other copy's
  *     can no longer bring a corrected typo back. exNotes, barWeights: key union
+ *   - gday, bodycomp (G-PLAN's daily log and InBody readings, keyed by day): the same rule as
+ *     the three below — a day logged on one device and another day on the other both stay
  *   - balanceOverrides, loadKind, plates: key union; of a key both have, the entry set last by
  *     its own `_ts`, a clear included (mergeStampedMap), the newer copy's on a tie. For plates the
  *     key is the unit, so the inventory of one unit is kept whole, as last edited
@@ -217,7 +219,7 @@ const RESET_LISTS = {
   workouts: workoutKey, routines: x => x?.id, customEx: x => x?.id, bodyweight: bodyweightKey,
   gymCards: x => x?.id, equipProfiles: x => x?.id, favEx: x => x,
 }
-const RESET_MAPS = ['exNotes', 'barWeights', 'balanceOverrides', 'loadKind', 'plates']
+const RESET_MAPS = ['exNotes', 'barWeights', 'balanceOverrides', 'loadKind', 'plates', 'gday', 'bodycomp']
 /** An entry's name in resetIds: a workout's id (or day and start), a weigh-in's day and time, … */
 export const entryKey = (field, x) => String(RESET_LISTS[field](x))
 // Per field, the most names a reset keeps — far more workouts than anyone logs, and a bound on
@@ -276,7 +278,7 @@ export function sinceReset(S, at, ids) {
     out.favEx = []
     out.exNotes = {}
     out.barWeights = {}
-    for (const f of ['balanceOverrides', 'loadKind', 'plates']) {
+    for (const f of ['balanceOverrides', 'loadKind', 'plates', 'gday', 'bodycomp']) {
       out[f] = Object.fromEntries(Object.entries(isMap(S[f]) ? S[f] : {}).filter(([, v]) => after(stampOf(v))))
     }
   }
@@ -399,7 +401,7 @@ export function mergeStates(a0, b0, { prefer } = {}) {
   // The plate-loading choices (lib/plates.js) are stamped the same way: an exercise's loading and
   // a unit's plate inventory are each one choice, made on one device, that a later set logged on
   // the other must not undo.
-  for (const f of ['balanceOverrides', 'loadKind', 'plates']) {
+  for (const f of ['balanceOverrides', 'loadKind', 'plates', 'gday', 'bodycomp']) {
     if (n[f] || o[f]) out[f] = clone(mergeStampedMap(n[f], o[f], prefer))
   }
   out._ts = Math.max(a._ts || 0, b._ts || 0)

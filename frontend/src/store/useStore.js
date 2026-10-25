@@ -177,6 +177,10 @@ export const DEF = {
   // cleared) replaces that role's curated exercise-id whitelist with a single user-chosen
   // exercise id; the stamp is what lets a sync keep the choice made last (lib/sync-merge.js).
   balanceTemplate: DEFAULT_TEMPLATE_ID, balanceOverrides: {},
+  // G-PLAN (lib/gplan.js): the plan itself (null until set up — targets, meal templates,
+  // supplements), each day's log keyed by date (lib/gplan-day.js) and InBody readings keyed by
+  // date. Both maps stamp every day with `_ts`, so a sync keeps both devices' days.
+  gplan: null, gday: {}, bodycomp: {},
 }
 const clone = o => JSON.parse(JSON.stringify(o))
 

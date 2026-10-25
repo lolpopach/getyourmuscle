@@ -30,6 +30,7 @@ import { ServerSyncSection, KeptChangesRows, leaveServer, connectServer, passkey
 import { passwordOn, PasswordRow, openPasswordSignIn, openPasswordRegister } from '../components/PasswordAuth.jsx'
 import { usePasskeys, PasskeysRow, DeviceLinkRow } from '../components/Passkeys.jsx'
 import { AppleHealthRow } from '../components/AppleHealth.jsx'
+import { gplanSetupSheet, bodycompSheet } from '../components/GplanSetup.jsx'
 import { Section, Row, SelectRow, Switch, Segmented, Button, TextField } from '../components/ui.jsx'
 
 export default function Settings() {
@@ -336,6 +337,13 @@ export default function Settings() {
     </Section>}
 
     {/* ---------- general ---------- */}
+    <Section title="G-PLAN">
+      <Row icon="target" iconTint="var(--acc)" title={t('G-PLAN goal and nutrition')} accessory="chevron"
+        subtitle={S.gplan ? t('{0} kcal · protein {1} g', S.gplan.targets.kcal, S.gplan.targets.p) : t('Not set up yet')} onClick={gplanSetupSheet} />
+      <Row icon="scale" iconTint="var(--blue)" title={t('InBody readings')} accessory="chevron" onClick={bodycompSheet}
+        subtitle={t(Object.keys(S.bodycomp || {}).length === 1 ? '{0} reading' : '{0} readings', Object.keys(S.bodycomp || {}).length)} />
+    </Section>
+
     <Section title={t('General')} footer={t('Switching the unit offers to convert every stored weight.')}>
       <SelectRow
         icon="globe" iconTint="var(--blue)" title={t('Language')}

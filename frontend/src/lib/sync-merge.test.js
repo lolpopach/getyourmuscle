@@ -661,3 +661,27 @@ describe('localExtras and the weigh-ins of a day both copies have', () => {
     expect(localExtras({ unit: 'lb', bodyweight: [{ d: '2026-09-27', w: convertBodyWeight(80, 'kg', 'lb'), t: 200 }] }, server).bodyweight).toBe(0)
   })
 })
+
+describe('G-PLAN day log and InBody readings', () => {
+  const day = (ts, kcal) => ({ _ts: ts, meals: { b: [{ id: 'm' + ts, kcal }] }, supps: {} })
+  it('keeps both devices’ days, and of a day both edited the later edit', () => {
+    const phone = base({ _ts: 20, gday: { '2026-10-24': day(5, 600), '2026-10-25': day(19, 700) }, bodycomp: { '2026-10-13': { _ts: 3, w: 79.1 } } })
+    const laptop = base({ _ts: 10, gday: { '2026-10-23': day(4, 500), '2026-10-25': day(9, 300) }, bodycomp: { '2026-11-09': { _ts: 8, w: 77.2 } } })
+    const out = mergeStates(phone, laptop)
+    expect(Object.keys(out.gday).sort()).toEqual(['2026-10-23', '2026-10-24', '2026-10-25'])
+    expect(out.gday['2026-10-25'].meals.b[0].kcal).toBe(700)
+    expect(Object.keys(out.bodycomp).sort()).toEqual(['2026-10-13', '2026-11-09'])
+    // the older copy's later edit of a day wins over the newer copy's earlier one
+    const out2 = mergeStates(base({ _ts: 30, gday: { '2026-10-25': day(1, 100) } }), base({ _ts: 2, gday: { '2026-10-25': day(25, 900) } }))
+    expect(out2.gday['2026-10-25'].meals.b[0].kcal).toBe(900)
+  })
+  it('a reset wipes the days it saw and keeps the ones logged after', () => {
+    const before = base({ gday: { '2026-10-24': day(5, 600) }, bodycomp: { '2026-10-13': { _ts: 3 } } })
+    const ids = resetIdsOf(before)
+    expect(ids.gday).toEqual(['2026-10-24'])
+    const later = base({ gday: { '2026-10-24': day(5, 600), '2026-10-30': day(50, 400) }, bodycomp: { '2026-10-13': { _ts: 3 } } })
+    const kept = sinceReset(later, 40, ids)
+    expect(Object.keys(kept.gday)).toEqual(['2026-10-30'])
+    expect(kept.bodycomp).toEqual({})
+  })
+})
