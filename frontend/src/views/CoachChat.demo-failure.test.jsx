@@ -1,8 +1,9 @@
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { parseHTML } from 'linkedom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import CoachChat from './CoachChat.jsx'
+import { coachStatus } from '../lib/coach-api.js'
 
 // The demo Coach's failure state, end to end. Every other CoachChat test mocks lib/coach-api.js;
 // this one runs the real thing with DEMO forced on, so the chain under test is exactly what the
@@ -62,7 +63,8 @@ async function click(el) {
   expect(el).toBeTruthy()
   await act(async () => { el.dispatchEvent(new dom.Event('click', { bubbles: true })); await flush() })
 }
-// Microtasks only: the dynamic import of coach-demo.js and the status refresh both settle here.
+// Microtasks only: the requests and the status refresh settle here, once coach-demo.js is
+// loaded (see beforeAll).
 const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve() }
 const settle = async () => { await act(async () => { await flush() }) }
 const elapse = async ms => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); await flush() }) }
@@ -79,6 +81,13 @@ const state = () => ({
     log: [], snapshots: [], chat: [{ id: 'c1', role: 'user', kind: 'intake', at: 1 }], timings: []
   },
 })
+
+// coach-api.js loads coach-demo.js with a dynamic import the first time it is asked anything.
+// In the test runner that is real module loading, not a microtask, so `flush` cannot wait for
+// it: the chip's request was still waiting on the import when the test read the thread (whose
+// last line was then the seeded intake), and it passed only when the runner happened to be
+// quick. Asking once here, on real timers, loads the module and leaves coach-api.js holding it.
+beforeAll(async () => { await coachStatus() })
 
 beforeEach(() => {
   vi.clearAllMocks()
