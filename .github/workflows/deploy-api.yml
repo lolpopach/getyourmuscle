@@ -39,7 +39,7 @@ env:
   FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
   FLY_APP: ${{ vars.FLY_APP || 'gplan-api-lolpopach' }}
   FLY_REGION: nrt
-  APP_HOST: ${{ inputs.app_host || vars.APP_HOST || '' }}
+  APP_HOST: ${{ inputs.app_host || vars.APP_HOST || 'getyourmuscle.yangchanhee11.workers.dev' }}
 
 jobs:
   api:
