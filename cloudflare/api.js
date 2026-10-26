@@ -4,7 +4,8 @@
  * Kept route for route with server.js where the app relies on it — the same paths, bodies,
  * status codes and cookie — so the frontend cannot tell the two apart:
  *   health, config, me; passkey sign-up and sign-in; sign out (here and everywhere);
- *   the state document with its revision and conflict rule; activity; Apple Health sync.
+ *   the state document with its revision and conflict rule; activity; Apple Health sync;
+ *   the school lunch menu and meal photos (G-PLAN).
  * Everything else (push, media, the Coach, admin, pairing, passwords, extra passkeys) answers
  * 404, which the app already reads as "this server does not have that" and hides.
  *
@@ -16,6 +17,8 @@ import crypto from 'node:crypto'
 import { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server'
 import { verifyError } from '../api/verify-error.js'
 import { issueHealthToken, hashHealthToken, parseIngest, mergeIngest, daysFrom } from '../api/health.js'
+import { lunchUrl, fetchMonth, lunchFor, isDay } from '../api/school-lunch.js'
+import { photoProvider, parsePhotoBody, recognizeMeal } from '../api/meal-photo.js'
 
 export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)`,
@@ -36,6 +39,8 @@ const MAX_BODY = 5 * 1024 * 1024
 const SESSION_DAYS = 90
 const CHALLENGE_MS = 5 * 60000
 const HEALTH_WRITES_PER_HOUR = 60
+// A photo is a model call against the day's free allowance: a few per meal is plenty.
+const PHOTOS_PER_HOUR = 30
 
 class HttpError extends Error { constructor(status, message) { super(message); this.status = status } }
 
@@ -64,7 +69,8 @@ async function readBody(request) {
 // origin check (server.js CSRF_EXEMPT).
 const CSRF_EXEMPT = new Set(['POST /api/register/options', 'POST /api/register/verify', 'POST /api/login/options', 'POST /api/login/verify'])
 
-export function createApi(db, env = {}) {
+// `fetch` reaches the school's site (the lunch menu) and Gemini; injectable for the tests.
+export function createApi(db, env = {}, { fetch: fetchImpl = (...a) => globalThis.fetch(...a) } = {}) {
   const one = (sql, ...p) => db.exec(sql, ...p)[0] || null
   const kvGet = k => one('SELECT v FROM kv WHERE k = ?', k)?.v ?? null
   const kvSet = (k, v) => db.exec('INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v', k, v)
@@ -114,6 +120,12 @@ export function createApi(db, env = {}) {
   }
 
   const healthWrites = new Map()   // uid → { start, n }, an hour's window
+  const photoUses = new Map()      // the same, for meal photos
+  const overLimit = (map, uid, max, now) => {
+    const w = map.get(uid)
+    if (!w || now - w.start > 3600000) { map.set(uid, { start: now, n: 1 }); return 0 }
+    return ++w.n > max ? Math.ceil((w.start + 3600000 - now) / 1000) : 0
+  }
 
   return async function handle(request, { now = Date.now() } = {}) {
     const url = new URL(request.url)
@@ -169,6 +181,9 @@ export function createApi(db, env = {}) {
         ...(openSignup() ? {} : { signup: false }),
         ...(env.DEFAULT_LANG !== '' ? { default_lang: env.DEFAULT_LANG || 'ko' } : {}),
         ...(session() ? { coach: null } : {}),
+        // G-PLAN: the school lunch menu, and whether photos can be read (a Gemini key, or the
+        // Workers AI binding in wrangler.jsonc).
+        lunch: !!lunchUrl(env), meal_photo: !!photoProvider(env),
       }),
 
       'GET /api/me': () => {
@@ -327,9 +342,8 @@ export function createApi(db, env = {}) {
         const tok = auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
         const u = tok.startsWith('gymh_') && tok.length <= 100 ? one('SELECT * FROM users WHERE health_h = ? AND disabled = 0', hashHealthToken(tok)) : null
         if (!u) return json(401, { error: 'invalid token' })
-        const w = healthWrites.get(u.id)
-        if (!w || now - w.start > 3600000) healthWrites.set(u.id, { start: now, n: 1 })
-        else if (++w.n > HEALTH_WRITES_PER_HOUR) return json(429, { error: 'too many requests' }, { 'Retry-After': String(Math.ceil((w.start + 3600000 - now) / 1000)) })
+        const wait = overLimit(healthWrites, u.id, HEALTH_WRITES_PER_HOUR, now)
+        if (wait) return json(429, { error: 'too many requests' }, { 'Retry-After': String(wait) })
         const p = parseIngest(await readBody(request), now)
         if (p.error) return json(400, { error: p.error })
         const doc = mergeIngest(readHealth(u.id), p.date, p.values, now)
@@ -342,6 +356,37 @@ export function createApi(db, env = {}) {
         const from = url.searchParams.get('from') || ''
         if (from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) return json(400, { error: 'from must be YYYY-MM-DD' })
         return json(200, { days: daysFrom(readHealth(u.id), from) })
+      },
+
+      /* ---------- G-PLAN: school lunch (api/school-lunch.js), meal photos (api/meal-photo.js) ---------- */
+      // One day's menu from the school's site, through a month cached in the database: the
+      // school's server is asked at most every few hours, and an old copy answers while it is down.
+      'GET /api/lunch': async () => {
+        if (!session()) return json(401, { error: 'not signed in' })
+        const base = lunchUrl(env)
+        if (!base) return json(404, { error: 'no school menu is set up' })
+        const date = url.searchParams.get('date') || ''
+        if (!isDay(date)) return json(400, { error: 'date must be YYYY-MM-DD' })
+        const k = 'lunch:' + date.slice(0, 7)
+        let cached = null
+        try { cached = JSON.parse(kvGet(k) || 'null') } catch { /* a broken copy is no copy */ }
+        const r = await lunchFor(date, cached, month => fetchMonth(base, month, { fetch: fetchImpl, now }), now)
+        if (r.error) return json(502, { error: r.error })
+        if (r.store) kvSet(k, JSON.stringify(r.store))
+        return json(200, r.body)
+      },
+      'POST /api/meal/photo': async () => {
+        const u = session()
+        if (!u) return json(401, { error: 'not signed in' })
+        const provider = photoProvider(env)
+        if (!provider) return json(404, { error: 'meal photos are not set up on this server' })
+        const wait = overLimit(photoUses, u.id, PHOTOS_PER_HOUR, now)
+        if (wait) return json(429, { error: 'too many photos — try again later' }, { 'Retry-After': String(wait) })
+        const input = parsePhotoBody(await readBody(request))
+        if (input.error) return json(400, { error: input.error })
+        const r = await recognizeMeal(provider, input, { fetch: fetchImpl })
+        if (r.error) return json(r.status || 502, { error: r.error })
+        return json(200, r)
       },
     }
 

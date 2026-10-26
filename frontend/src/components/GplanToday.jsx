@@ -1,7 +1,8 @@
 // G-PLAN's "today" card on Home (docs/dev/GETYOURMUSCLE_PLAN.md §4.4): the day's checklist —
 // supplements, the four meals, the workout, steps and water — under the budget that is left and
-// the one thing to do next. Tapping a meal opens its sheet: templates in one tap, or a quick
-// entry. The arithmetic is lib/gplan-day.js; this file only lays it out.
+// the one thing to do next. Tapping a meal opens its sheet: a photo or the food calculator, the
+// school lunch (lunch only), templates in one tap, or a quick entry. The arithmetic is
+// lib/gplan-day.js; this file only lays it out (the food helpers are GplanFood.jsx).
 import { useEffect, useState } from 'react'
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
@@ -15,6 +16,7 @@ import { SLOTS } from '../lib/gplan.js'
 import { dayOf, dayTotals, slotTotals, remaining, addMeal, removeMeal, toggleSupp, setDayValue, saveTemplate, removeTemplate, suppStreak, checklist, nextHint } from '../lib/gplan-day.js'
 import Icon from './Icon.jsx'
 import { Row, Button, NumberField, TextField, Switch } from './ui.jsx'
+import { FoodEntryButtons, LunchCard, useFoodFeatures } from './GplanFood.jsx'
 
 const ui = () => useUI.getState()
 const update = (...a) => useStore.getState().update(...a)
@@ -162,6 +164,7 @@ function MealSheet({ iso, slot, close }) {
   const [showOthers, setShowOthers] = useState(false)
   const [form, setForm] = useState({ name: '', kcal: null, p: null, c: null, f: null })
   const [asTemplate, setAsTemplate] = useState(false)
+  const features = useFoodFeatures()
   const set = k => v => setForm(f => ({ ...f, [k]: v }))
   const canAdd = (form.kcal || 0) > 0 || (form.p || 0) > 0
 
@@ -196,6 +199,9 @@ function MealSheet({ iso, slot, close }) {
           onClick={() => update(st => { removeMeal(st, iso, slot, x.id) })} aria-label={t('Delete')}><Icon name="trash" /></button>
       </Row>)}
     </div>}
+
+    {slot === 'l' && features.lunch && <LunchCard iso={iso} />}
+    <FoodEntryButtons iso={iso} slot={slot} photo={features.photo} />
 
     <div className="row between" style={{ marginBottom: 6 }}>
       <b className="small">{t('Templates')}</b>

@@ -10,6 +10,9 @@
   // deploy — nothing to make by hand, and free on the Workers Free plan.
   "durable_objects": { "bindings": [{ "name": "STORE", "class_name": "GymStore" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GymStore"] }],
+  // Workers AI reads meal photos (api/meal-photo.js) inside the Free plan's daily allowance — no
+  // key to set. A GEMINI_API_KEY secret on the Worker is used instead when there is one.
+  "ai": { "binding": "AI" },
   // `wrangler deploy` from a shell builds the app first. Cloudflare's Git builds (Workers Builds)
   // ignore this block, so there the same command is the dashboard's Build command
   // (docs/DEPLOY_CLOUDFLARE.md).
@@ -25,6 +28,7 @@
   // The API runs in this Worker (cloudflare/api.js). Runtime settings live on the Worker itself
   // (dashboard → Settings → Variables and Secrets) and survive Git deploys: OPEN_SIGNUP=1 lets
   // more than the first profile sign up; DEFAULT_LANG (default ko); API_MODE=proxy with
-  // API_ORIGIN sends /api to the Node server in api/ instead.
+  // API_ORIGIN sends /api to the Node server in api/ instead; LUNCH_URL another school's menu
+  // page ('' turns the lunch card off); GEMINI_API_KEY (secret), GEMINI_MODEL, WORKERS_AI_MODEL.
   "keep_vars": true
 }

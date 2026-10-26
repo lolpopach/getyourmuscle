@@ -32,6 +32,8 @@ import {
 import { createDeviceLink, findDeviceLink, burnDeviceLink, dropDeviceLinks } from './device-link.js';
 import { createMediaStore, mediaLimits, mediaConfig, MediaError, HASH_RE } from './media.js';
 import { issueHealthToken, revokeHealthToken, findHealthUser, parseIngest, mergeIngest, daysFrom } from './health.js';
+import { fetchMonth, lunchFor, isDay } from './school-lunch.js';
+import { photoProvider, parsePhotoBody, recognizeMeal } from './meal-photo.js';
 
 const PORT = +(process.env.PORT || 3000);
 const DATA = process.env.DATA_DIR || '/data';
@@ -71,6 +73,13 @@ const TRUST_PROXY = /^(1|true|yes|on)$/i.test(process.env.TRUST_PROXY || '');
 // internet don't want the same number. Only affects cookies minted from now on — the expiry is
 // baked into each cookie when it's issued, so lowering this never cuts an existing session short.
 const SESSION_DAYS = Math.max(1, +(process.env.SESSION_DAYS || 90) || 90);
+// G-PLAN (docs/dev/GETYOURMUSCLE_PLAN.md): the school lunch menu read off a withschool.co.kr
+// 식단표 page (LUNCH_URL, school-lunch.js) and meal photos read by Gemini (GEMINI_API_KEY, a free
+// Google AI Studio key; meal-photo.js). Both off unless set, so an instance without them answers
+// exactly as before.
+const LUNCH_BASE = String(process.env.LUNCH_URL || '').trim();
+const PHOTO = photoProvider({ GEMINI_API_KEY: process.env.GEMINI_API_KEY, GEMINI_MODEL: process.env.GEMINI_MODEL });
+const LUNCH_MONTHS = new Map();   // 'YYYY-MM' → the month's menu as last fetched, a few months at most
 const MAX_BODY = 5 * 1024 * 1024;
 // Secure cookies require HTTPS; over plain http://localhost the flag would drop the cookie
 const SECURE = /^https:/i.test(ORIGIN) ? ' Secure;' : '';
@@ -823,7 +832,9 @@ const ACCOUNT_FAILS = createBackoff({
 });
 // Apple Health syncs per profile: a Shortcut runs once or twice a day, so this only stops a loop.
 const HEALTH_WRITES = createWindow({ max: 60, windowMs: 3600000 });
-setInterval(() => { AUTH_BURST.sweep(); ADDR_FAILS.sweep(); ACCOUNT_FAILS.sweep(); HEALTH_WRITES.sweep(); }, 60000).unref();
+// A meal photo is a call against the provider's free allowance: a few per meal is plenty.
+const MEAL_PHOTOS = createWindow({ max: 30, windowMs: 3600000 });
+setInterval(() => { AUTH_BURST.sweep(); ADDR_FAILS.sweep(); ACCOUNT_FAILS.sweep(); HEALTH_WRITES.sweep(); MEAL_PHOTOS.sweep(); }, 60000).unref();
 
 // Route -> the kind of failure it can count. Every route listed here also spends the burst
 // budget; `null` spends only that.
@@ -1771,6 +1782,9 @@ const routes = {
       // Public like the two flags above: the caps are not a secret, and the absence of the
       // block is how the app knows this server does not take photos and videos at all.
       ...(MEDIA_ON ? { media: mediaConfig(MEDIA_LIMITS) } : {}),
+      // G-PLAN's lunch card and photo button, only when this instance has them.
+      ...(LUNCH_BASE ? { lunch: true } : {}),
+      ...(PHOTO ? { meal_photo: true } : {}),
       ...(readSession(req) ? { coach: coachConfig.publicConfig() } : {})
     });
   },
@@ -2125,6 +2139,34 @@ const routes = {
     const from = new URL(req.url, 'http://x').searchParams.get('from') || '';
     if (from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) return json(res, 400, { error: 'from must be YYYY-MM-DD' });
     json(res, 200, { days: daysFrom(readHealth(user.id), from) });
+  },
+
+  /* ---------- G-PLAN: the school lunch menu (school-lunch.js) and meal photos (meal-photo.js) ---------- */
+  'GET /api/lunch': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    if (!LUNCH_BASE) return json(res, 404, { error: 'no school menu is set up' });
+    const date = new URL(req.url, 'http://x').searchParams.get('date') || '';
+    if (!isDay(date)) return json(res, 400, { error: 'date must be YYYY-MM-DD' });
+    const r = await lunchFor(date, LUNCH_MONTHS.get(date.slice(0, 7)), month => fetchMonth(LUNCH_BASE, month));
+    if (r.error) return json(res, 502, { error: r.error });
+    if (r.store) {
+      LUNCH_MONTHS.set(r.store.month, r.store);
+      while (LUNCH_MONTHS.size > 6) LUNCH_MONTHS.delete(LUNCH_MONTHS.keys().next().value);
+    }
+    json(res, 200, r.body);
+  },
+  'POST /api/meal/photo': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    if (!PHOTO) return json(res, 404, { error: 'meal photos are not set up on this server' });
+    const wait = MEAL_PHOTOS.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const input = parsePhotoBody(await readBody(req));
+    if (input.error) return json(res, 400, { error: input.error });
+    const r = await recognizeMeal(PHOTO, input);
+    if (r.error) return json(res, r.status || 502, { error: r.error });
+    json(res, 200, r);
   },
   'GET /api/push/public-key': async (req, res) => json(res, 200, { key: vapid.publicKey }),
 

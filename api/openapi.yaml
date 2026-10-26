@@ -84,6 +84,12 @@ info:
       the language of the sign-in screen and of every profile that never picked one.
     - `TRUST_PROXY=1` — the throttle reads the client address from proxy headers (set by
       the bundled `docker-compose.yml`, where only the web container can reach the API).
+    - `LUNCH_URL` (unset by default) — a school's withschool.co.kr 식단표 page
+      (e.g. `http://kshcm.net/?menu_no=34`): adds `GET /api/lunch` and `lunch: true` in
+      `GET /api/config`.
+    - `GEMINI_API_KEY` (unset by default; a free Google AI Studio key), `GEMINI_MODEL`
+      (default `gemini-3.8-flash`) — adds `POST /api/meal/photo` and `meal_photo: true` in
+      `GET /api/config`.
     - `MEDIA_UPLOADS` (default on; `0` removes the `media` routes and the `media` block of
       `GET /api/config`), `MEDIA_QUOTA_MB` (200 per profile, `0` = no cap),
       `MEDIA_IMAGE_MAX_MB` (2), `MEDIA_GIF_MAX_MB` (8), `MEDIA_VIDEO_MAX_MB` (40),
@@ -153,6 +159,11 @@ tags:
       attached to a logged workout. Stored per profile (one quota for both) and named
       by the SHA-256 of its bytes; the state only carries a `MediaRef`. Every route here is a
       404 when the instance runs with `MEDIA_UPLOADS=0`.
+  - name: gplan
+    description: >-
+      G-PLAN's diet helpers: the school lunch menu read off the school's homepage
+      (`LUNCH_URL`) and meal photos read by a free vision model (`GEMINI_API_KEY`). Each is a
+      404 while its setting is unset.
   - name: coach
     description: >-
       AI Coach — plans, reviews and debriefs. Every route here answers 503 unless the
@@ -261,6 +272,14 @@ paths:
                       always wins; a tag the app has no translation for is ignored.
                   media:
                     $ref: '#/components/schemas/MediaConfig'
+                  lunch:
+                    type: boolean
+                    const: true
+                    description: Present (and true) only when LUNCH_URL is set — the app then shows the school lunch.
+                  meal_photo:
+                    type: boolean
+                    const: true
+                    description: Present (and true) only when GEMINI_API_KEY is set — the app then offers meal photos.
               examples:
                 anonymous: { value: { invite_only: true, allow_guest: false } }
                 signedInNoCoach: { value: { invite_only: true, allow_guest: false, coach: null } }
@@ -1430,6 +1449,127 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/lunch:
+    get:
+      tags: [gplan]
+      operationId: lunchDay
+      summary: One day's school lunch, read off the school's menu page
+      description: |
+        The month's page is fetched from `LUNCH_URL` (EUC-KR, parsed by `school-lunch.js`) and
+        kept for six hours; while the school's site is down an older copy answers. Dish lines
+        are passed on as the school writes them (`순두부찌개(0.6)`, `돈까스*브라운소스`): what
+        they mean is the app's to read.
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The day's meals; an empty list on a day without school lunch.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date: { type: string, format: date }
+                  meals:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        label: { type: string, description: 'The meal, as the page names it (중식).' }
+                        dishes: { type: array, items: { type: string } }
+                  fetchedAt: { type: integer, description: When the month was read off the school's site (ms). }
+              example: { date: "2026-10-01", meals: [{ label: "중식", dishes: ["흰쌀밥", "순두부찌개(0.6)", "소불고기", "치즈계란말이*케찹", "열무김치", "파인애플"] }], fetchedAt: 1792990000000 }
+        '400':
+          description: '`date` is not YYYY-MM-DD.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: No `LUNCH_URL` on this instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '502':
+          description: The school's site could not be read and no earlier copy of the month is kept.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/meal/photo:
+    post:
+      tags: [gplan]
+      operationId: mealPhoto
+      summary: What is in a meal photo, and how much
+      description: |
+        Sends the photo to the instance's vision model (Gemini with `GEMINI_API_KEY`) and
+        answers with the dishes it names in Korean and their servings against a standard
+        portion (rice 1 bowl = 210 g). The model's own calorie estimate rides along, but the
+        app takes its numbers from its own food table and uses the model's only for a dish the
+        table cannot place. Nothing is stored. 30 photos an hour per profile.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image: { type: string, description: 'A JPEG, PNG or WebP as a base64 data URL, at most 3 MB.' }
+                note: { type: string, maxLength: 200, description: 'What the photo does not show, e.g. "밥 반만 먹음".' }
+      responses:
+        '200':
+          description: The dishes.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        servings: { type: number, description: In steps of 0.25. }
+                        grams: { type: integer }
+                        kcal: { type: integer }
+                        p: { type: integer }
+                        c: { type: integer }
+                        f: { type: integer }
+                  provider: { type: string, enum: [gemini, workers-ai] }
+                  model: { type: string }
+              example: { items: [{ name: "흰쌀밥", servings: 1, grams: 210, kcal: 310, p: 6, c: 68, f: 1 }, { name: "제육볶음", servings: 1, grams: 150, kcal: 340, p: 20, c: 12, f: 23 }], provider: gemini, model: gemini-3.8-flash }
+        '400':
+          description: The image is missing, not a data URL, not JPEG/PNG/WebP, or too large.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: No `GEMINI_API_KEY` on this instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: The model found no food in the photo.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Over 30 photos this hour, or the provider's free allowance is spent (`Retry-After` when it is ours).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '502':
+          description: The provider failed or answered something that could not be read.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/device-link/options:
     post:
