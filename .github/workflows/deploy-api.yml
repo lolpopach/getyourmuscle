@@ -24,6 +24,9 @@ on:
       admin_uid:
         description: Account ID to make admin (lock-signups)
         required: false
+      app_host:
+        description: The Worker's hostname, e.g. getyourmuscle.<account>.workers.dev (overrides the APP_HOST variable)
+        required: false
 
 concurrency:
   group: deploy-api
@@ -36,7 +39,7 @@ env:
   FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
   FLY_APP: ${{ vars.FLY_APP || 'gplan-api-lolpopach' }}
   FLY_REGION: nrt
-  APP_HOST: ${{ vars.APP_HOST || '' }}
+  APP_HOST: ${{ inputs.app_host || vars.APP_HOST || '' }}
 
 jobs:
   api:
