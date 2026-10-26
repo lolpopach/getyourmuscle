@@ -1,16 +1,53 @@
-# Deploying on Cloudflare + Fly.io
+# Deploying on Cloudflare
+
+Everything runs in one Cloudflare Worker, on the Workers Free plan, with no other provider:
 
 ```
-Browser ──► Cloudflare Worker (one hostname) ──┬─ static app (frontend/dist, Workers Static Assets)
-                                               └─ /api/*  ──proxy──►  Fly.io: api/ (Node + /data volume)
+Browser ──► Cloudflare Worker (one hostname)
+              ├─ static app            frontend/dist (Workers Static Assets)
+              └─ /api/*  ─────────────► GymStore Durable Object (SQLite) — cloudflare/api.js
 ```
 
-The API stores everything as files in `DATA_DIR`, so it runs on Fly.io with a volume. The Worker
-serves the app and proxies `/api/*`, keeping everything on one origin (required for passkeys).
-No local Docker is needed: Fly builds the image remotely.
+The API (`cloudflare/api.js`) is the app's core of `api/server.js` — passkey sign-up and sign-in,
+sessions, the state document with its revision and conflict rule, Apple Health sync — on a
+SQLite-backed Durable Object, which the first deploy creates by itself. Push notifications,
+photo/video uploads, the AI Coach, admin, pairing, passwords and extra passkeys are not there;
+the app hides them, as it does on any server that lacks them.
 
-Exercise images/GIFs come from the jsDelivr CDN (`npm run build:cloudflare`), so they are not
-bundled or hosted by you.
+- **One owner.** The first profile created can sign up; after it, sign-up is closed. Set the
+  Worker variable `OPEN_SIGNUP=1` to keep it open.
+- **No address to configure.** The passkey relying party (RP_ID) and ORIGIN are the address
+  the app is served on. `RP_ID` / `ORIGIN` variables override them.
+- `DEFAULT_LANG` (default `ko`).
+
+## Deploy on every push (Cloudflare Git builds)
+
+Workers & Pages → the Worker → Settings → Build, connected to this repository:
+
+- **Build command:** `cd frontend && npm ci && npm run build:cloudflare` (also installs the
+  Worker's own dependency, `@simplewebauthn/server`, in `cloudflare/`)
+- **Deploy command:** `npx wrangler deploy`
+
+Workers Builds does not run the `build` block of `wrangler.jsonc`, so the build command must
+be set there. Turn **Cloudflare Access off** for the workers.dev address: behind Access the iOS
+Shortcut cannot post Apple Health data and the installed app is sent to a login page.
+
+## Local run
+
+```bash
+cd frontend && npm ci && npm run build:cloudflare && cd ..
+npx wrangler dev            # app and API on http://localhost:8787
+cd cloudflare && npm test   # the API on node:sqlite
+```
+
+---
+
+# Alternative: the full Node server on Fly.io
+
+For push notifications, uploads and the Coach, the Worker can pass `/api` to `api/server.js`
+instead: set the Worker variables `API_MODE=proxy` and `API_ORIGIN=https://<fly app>.fly.dev`
+(and `PROXY_SECRET`). The Fly side deploys with `.github/workflows/deploy-api.yml` (run by hand)
+or the command below; Fly needs a card on file.
 
 ## One command
 

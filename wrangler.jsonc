@@ -4,6 +4,12 @@
   "main": "cloudflare/worker.js",
   "compatibility_date": "2025-09-01",
   "workers_dev": true,
+  // node:crypto and Buffer for the API (cloudflare/api.js); @simplewebauthn/server runs on them.
+  "compatibility_flags": ["nodejs_compat"],
+  // The API's data: one SQLite-backed Durable Object (cloudflare/store.js), created on the first
+  // deploy — nothing to make by hand, and free on the Workers Free plan.
+  "durable_objects": { "bindings": [{ "name": "STORE", "class_name": "GymStore" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GymStore"] }],
   // `wrangler deploy` from a shell builds the app first. Cloudflare's Git builds (Workers Builds)
   // ignore this block, so there the same command is the dashboard's Build command
   // (docs/DEPLOY_CLOUDFLARE.md).
@@ -16,9 +22,9 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
-  // API_ORIGIN (the Fly.io API, e.g. https://<app>.fly.dev) and PROXY_SECRET are set on the
-  // Worker itself — in the dashboard (Settings → Variables and Secrets) or by
-  // scripts/deploy-cloud.sh — and kept across Git deploys. Until API_ORIGIN is set, /api answers
-  // 503 and the app runs in guest mode.
+  // The API runs in this Worker (cloudflare/api.js). Runtime settings live on the Worker itself
+  // (dashboard → Settings → Variables and Secrets) and survive Git deploys: OPEN_SIGNUP=1 lets
+  // more than the first profile sign up; DEFAULT_LANG (default ko); API_MODE=proxy with
+  // API_ORIGIN sends /api to the Node server in api/ instead.
   "keep_vars": true
 }

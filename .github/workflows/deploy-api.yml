@@ -10,10 +10,9 @@
 #   lock-signups   makes `admin_uid` the admin and turns on INVITE_ONLY, after the owner signed up
 name: Deploy API
 
+# Optional since the API runs in the Cloudflare Worker itself (cloudflare/api.js): run by hand
+# only, for an instance that wants the full Node server (push, media, Coach) on Fly.io instead.
 on:
-  push:
-    branches: [claude/eloquent-dijkstra-bu8u7v]
-    paths: ['api/**', '.github/workflows/deploy-api.yml']
   workflow_dispatch:
     inputs:
       action:
@@ -49,7 +48,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
-      # A push before FLY_API_TOKEN and APP_HOST exist is skipped with a notice; a run by hand fails.
+      # Without FLY_API_TOKEN or APP_HOST the run fails and says which is missing.
       - name: Check the configuration
         id: check
         run: |
