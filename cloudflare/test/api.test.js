@@ -21,10 +21,10 @@ function setup(env = {}) {
     return `__Host-gymsid=${p}.${crypto.createHmac('sha256', secret).update(p).digest('base64url')}`
   }
   const addUser = (id = 'u1', name = 'Chan') => db.exec('INSERT INTO users (id, name, created) VALUES (?, ?, ?)', id, name, new Date().toISOString())
-  const call = async (method, path, { body, cookie, headers = {} } = {}) => {
+  const call = async (method, path, { body, raw, cookie, headers = {} } = {}) => {
     const h = { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin', ...headers }
     if (cookie) h.cookie = cookie
-    const res = await handle(new Request(HOST + path, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) }))
+    const res = await handle(new Request(HOST + path, { method, headers: h, body: raw ?? (body === undefined ? undefined : JSON.stringify(body)) }))
     const text = await res.text()
     return { status: res.status, body: text ? JSON.parse(text) : null, headers: res.headers }
   }
@@ -149,7 +149,7 @@ test('Apple Health: issue a token, ingest with it, read back, revoke', async () 
   addUser()
   const cookie = cookieFor('u1')
   const today = new Date().toISOString().slice(0, 10)
-  assert.deepEqual((await call('GET', '/api/account/health-token', { cookie })).body, { active: false, created: null, lastSync: null })
+  assert.deepEqual((await call('GET', '/api/account/health-token', { cookie })).body, { active: false, created: null, lastSync: null, last: null })
   const { token } = (await call('POST', '/api/account/health-token', { cookie })).body
   assert.match(token, /^gymh_/)
   const shortcut = { authorization: 'Bearer ' + token, 'sec-fetch-site': '' }
@@ -162,4 +162,33 @@ test('Apple Health: issue a token, ingest with it, read back, revoke', async () 
   assert.equal((await call('GET', '/api/account/health-token', { cookie })).body.active, true)
   await call('DELETE', '/api/account/health-token', { cookie })
   assert.equal((await call('POST', '/api/health/ingest', { headers: shortcut, body: { date: today, dist: 9 } })).status, 401)
+})
+
+test('Apple Health: the five-action Shortcut — token in the address, no date, text values', async () => {
+  const { call, cookieFor, addUser } = setup()
+  addUser()
+  const cookie = cookieFor('u1')
+  const { token } = (await call('POST', '/api/account/health-token', { cookie })).body
+  // What Shortcuts sends: no cookie, no Origin, no Sec-Fetch-Site; the date is the server's, in
+  // the zone the address names.
+  const shortcut = { 'sec-fetch-site': '' }
+  const at = '/api/health/ingest?key=' + token + '&tz=' + encodeURIComponent('Asia/Ho_Chi_Minh')
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date())
+  const ok = await call('POST', at, { headers: shortcut, body: { steps: '9,300', dist: '6.4 km' } })
+  assert.equal(ok.status, 200)
+  assert.equal(ok.body.date, day)
+  assert.deepEqual([ok.body.saved.steps, ok.body.saved.distKm], [9300, 6.4])
+  assert.equal((await call('GET', '/api/account/health-token', { cookie })).body.last.date, day)
+
+  // Why the last call saved nothing is kept for the app to show; a later good one clears it.
+  assert.equal((await call('POST', at, { headers: shortcut, body: { steps: 'lots' } })).status, 400)
+  assert.equal((await call('GET', '/api/account/health-token', { cookie })).body.last.error, 'steps out of range')
+  assert.equal((await call('POST', at, { headers: { ...shortcut, 'content-type': 'application/x-www-form-urlencoded' }, raw: 'steps=9300' })).status, 400)
+  assert.equal((await call('GET', '/api/account/health-token', { cookie })).body.last.error, 'invalid json')
+  assert.equal((await call('POST', at, { headers: shortcut, body: { steps: [4000, 5300] } })).body.saved.steps, 9300)
+  assert.equal('error' in (await call('GET', '/api/account/health-token', { cookie })).body.last, false)
+
+  // A wrong key is refused and recorded nowhere.
+  assert.equal((await call('POST', '/api/health/ingest?key=gymh_wrong', { headers: shortcut, body: { steps: 1 } })).status, 401)
+  assert.equal((await call('POST', '/api/health/ingest', { headers: shortcut, body: { steps: 1 } })).status, 401)
 })

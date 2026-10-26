@@ -1310,7 +1310,18 @@ paths:
                   active: { type: boolean }
                   created: { type: number, nullable: true, description: When the token was issued (ms). }
                   lastSync: { type: number, nullable: true, description: The newest ingest (ms). }
-              example: { active: true, created: 1790000000000, lastSync: 1790050000000 }
+                  last:
+                    type: object
+                    nullable: true
+                    description: >-
+                      What the latest call with the right token came to: `{ at, date }` when it
+                      saved, `{ at, error }` when it did not (the 400's message), for the app to
+                      say what to change in the Shortcut.
+                    properties:
+                      at: { type: number }
+                      date: { type: string, format: date }
+                      error: { type: string }
+              example: { active: true, created: 1790000000000, lastSync: 1790050000000, last: { at: 1790050000000, date: "2026-10-13" } }
         '401': { $ref: '#/components/responses/Unauthorized' }
     post:
       tags: [health]
@@ -1354,30 +1365,40 @@ paths:
       operationId: healthIngest
       summary: One day's numbers from Apple Health (sent by the iOS Shortcut)
       description: |
-        Authenticated with the health token as `Authorization: Bearer gymh_…`, not a session.
-        The Shortcut sends the day's running totals, so a later sync for the same date
-        replaces the fields it carries and keeps the others. Numbers may be sent as JSON
-        numbers or as numeric strings (a decimal comma is accepted). `bodyFat` may be a
-        percentage or the 0–1 fraction Health stores. The date must be within the last 31
-        days. A wrong token counts against the address like a wrong device-link code.
+        Authenticated with the health token, not a session: as `Authorization: Bearer gymh_…`,
+        or as `key` in the address, which is what the app hands out so the Shortcut needs no
+        header. The Shortcut sends the day's running totals, so a later sync for the same date
+        replaces the fields it carries and keeps the others. Numbers may be JSON numbers or
+        text: a unit after the number (`6.4 km`, `4200 m`, `9300 걸음`), a decimal comma, digit
+        grouping (`9,300`, `9.300`) in whole-number fields, and a list, which is summed.
+        `bodyFat` may be a percentage or the 0–1 fraction Health stores. Without `date` the day
+        is today in `tz` (UTC without it); a date must be within the last 31 days. A call with
+        the right token that saves nothing is recorded as `last` (`GET /api/account/health-token`).
+        A wrong token counts against the address like a wrong device-link code.
       security:
         - healthToken: []
+        - healthKey: []
+      parameters:
+        - name: tz
+          in: query
+          required: false
+          schema: { type: string, example: Asia/Ho_Chi_Minh }
+          description: IANA time zone that decides "today" when the body has no `date`.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [date]
               properties:
-                date: { type: string, format: date }
+                date: { type: string, format: date, description: Optional; today in `tz` without it. }
                 dist: { type: number, description: Walking + running distance. }
                 unit: { type: string, enum: [km, m, mi], default: km }
                 steps: { type: number }
                 activeKcal: { type: number }
                 weight: { type: number, description: kg }
                 bodyFat: { type: number, description: '% (or a 0–1 fraction)' }
-            example: { date: "2026-10-13", dist: 7.84, unit: km, steps: 10312, activeKcal: 612 }
+            example: { dist: 7.84, steps: 10312 }
       responses:
         '200':
           description: Saved. `saved` is the whole day as now stored.
@@ -1390,7 +1411,7 @@ paths:
                   date: { type: string }
                   saved: { $ref: '#/components/schemas/HealthDay' }
         '400':
-          description: A field is missing, not a number, or out of range.
+          description: The body is not JSON, or a field is not a number or is out of range.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -3018,6 +3039,13 @@ components:
       description: >-
         The write-only Apple Health sync token (`gymh_…`) from `POST /api/account/health-token`,
         carried by the iOS Shortcut. Good for `POST /api/health/ingest` only.
+    healthKey:
+      type: apiKey
+      in: query
+      name: key
+      description: >-
+        The same token as `key` in the address the app hands out, so the Shortcut needs no
+        Authorization header.
 
   responses:
     Unauthorized:

@@ -31,7 +31,7 @@ import {
 } from './passkeys-store.js';
 import { createDeviceLink, findDeviceLink, burnDeviceLink, dropDeviceLinks } from './device-link.js';
 import { createMediaStore, mediaLimits, mediaConfig, MediaError, HASH_RE } from './media.js';
-import { issueHealthToken, revokeHealthToken, findHealthUser, parseIngest, mergeIngest, daysFrom } from './health.js';
+import { issueHealthToken, revokeHealthToken, findHealthUser, ingestToken, parseIngest, mergeIngest, failedIngest, daysFrom } from './health.js';
 
 const PORT = +(process.env.PORT || 3000);
 const DATA = process.env.DATA_DIR || '/data';
@@ -549,7 +549,9 @@ const clearCookie = COOKIE === LEGACY_COOKIE
 const CSRF_EXEMPT = new Set([
   'POST /api/register/options', 'POST /api/register/verify',
   'POST /api/login/options', 'POST /api/login/verify',
-  'POST /api/pair/redeem'
+  'POST /api/pair/redeem',
+  // The Shortcut's token rides in the address (?key=): no cookie is read, so nothing to borrow.
+  'POST /api/health/ingest'
 ]);
 const originsMatch = (a, b) => a.replace(/\/+$/, '') === b.replace(/\/+$/, '');
 function csrfOk(req, key) {
@@ -2089,9 +2091,9 @@ const routes = {
   'GET /api/account/health-token': async (req, res) => {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
-    const days = Object.values(readHealth(user.id).days || {});
-    const lastSync = days.reduce((m, d) => Math.max(m, +d?.at || 0), 0) || null;
-    json(res, 200, { active: !!user.healthTok, created: user.healthTok?.created || null, lastSync });
+    const doc = readHealth(user.id);
+    const lastSync = Object.values(doc.days || {}).reduce((m, d) => Math.max(m, +d?.at || 0), 0) || null;
+    json(res, 200, { active: !!user.healthTok, created: user.healthTok?.created || null, lastSync, last: doc.last || null });
   },
   'POST /api/account/health-token': async (req, res) => {
     const user = readSession(req);
@@ -2108,13 +2110,20 @@ const routes = {
     json(res, 200, { active: false });
   },
   'POST /api/health/ingest': async (req, res) => {
-    const auth = req.headers.authorization || '';
-    const user = auth.startsWith('Bearer ') ? findHealthUser(db.users, auth.slice(7).trim()) : null;
+    const params = new URL(req.url, 'http://x').searchParams;
+    const user = findHealthUser(db.users, ingestToken(req.headers.authorization, params));
     if (!user) { strikeAddress(req, 'health'); return json(res, 401, { error: 'invalid token' }); }
     const wait = HEALTH_WRITES.take(user.id);
     if (wait) return tooMany(res, wait);
-    const p = parseIngest(await readBody(req));
-    if (p.error) return json(res, 400, { error: p.error });
+    // A body that is not JSON (the Shortcut's "Form" instead of "JSON") is recorded like a bad
+    // value, so the app can say what to change.
+    let p;
+    try { p = parseIngest(await readBody(req), Date.now(), { tz: params.get('tz') || '' }); }
+    catch (e) { if (e instanceof HttpError && e.status === 400) p = { error: e.message }; else throw e; }
+    if (p.error) {
+      atomicWrite(healthFile(user.id), JSON.stringify(failedIngest(readHealth(user.id), p.error)), 0o600);
+      return json(res, 400, { error: p.error });
+    }
     const doc = mergeIngest(readHealth(user.id), p.date, p.values);
     atomicWrite(healthFile(user.id), JSON.stringify(doc), 0o600);
     json(res, 200, { ok: true, date: p.date, saved: doc.days[p.date] });

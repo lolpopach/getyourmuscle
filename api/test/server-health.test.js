@@ -29,7 +29,7 @@ test('issue a token, ingest with it, read the days back, revoke', async t => {
 
   const app = { cookie: cookie(), origin: 'http://localhost:8080', 'content-type': 'application/json' };
   assert.equal((await fetch(`${base}/api/account/health-token`)).status, 401);
-  assert.deepEqual(await (await fetch(`${base}/api/account/health-token`, { headers: app })).json(), { active: false, created: null, lastSync: null });
+  assert.deepEqual(await (await fetch(`${base}/api/account/health-token`, { headers: app })).json(), { active: false, created: null, lastSync: null, last: null });
 
   // Issuing from another site is refused like any other cookie-authenticated change.
   const forged = await fetch(`${base}/api/account/health-token`, { method: 'POST', headers: { ...app, origin: 'https://evil.example' } });
@@ -47,6 +47,16 @@ test('issue a token, ingest with it, read the days back, revoke', async t => {
 
   const bad = await fetch(`${base}/api/health/ingest`, { method: 'POST', headers: shortcut, body: JSON.stringify({ date: today(), dist: 'far' }) });
   assert.equal(bad.status, 400);
+  assert.equal((await (await fetch(`${base}/api/account/health-token`, { headers: app })).json()).last.error, 'dist must be a number');
+
+  // The five-action Shortcut: the token in the address, no header, no date, a Form body by mistake.
+  const at = `${base}/api/health/ingest?key=${issued.token}&tz=UTC`;
+  const form = await fetch(at, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'steps=1' });
+  assert.equal(form.status, 400);
+  assert.equal((await (await fetch(`${base}/api/account/health-token`, { headers: app })).json()).last.error, 'invalid json');
+  const keyed = await fetch(at, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ steps: '10,312', dist: '7.84 km' }) });
+  assert.equal(keyed.status, 200);
+  assert.equal((await keyed.json()).date, today());
 
   // The token is not a session: it reads nothing.
   assert.equal((await fetch(`${base}/api/data`, { headers: shortcut })).status, 401);
