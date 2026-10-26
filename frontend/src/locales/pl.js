@@ -1666,6 +1666,7 @@ export default {
   // G-PLAN starter plan (sheets.jsx PLAN_COPY)
   'G-PLAN Solid Build': 'G-PLAN Solid Build',
   'Chest and shoulders, back and arms first, two leg days and an optional upper-body volume day.': 'Chest and shoulders, back and arms first, two leg days and an optional upper-body volume day.',
+  'Load my G-PLAN routine': 'Load my G-PLAN routine',
   // Apple Health sync (components/AppleHealth.jsx) — English until translated
   'Copy address': 'Copy address',
   'Copy token': 'Copy token',
