@@ -25,7 +25,8 @@ const REVIEW_NOCHANGE = { coach_contract: 1, nochange: true, reading: 'Plan not 
 const REVIEW_CHANGE = {
   coach_contract: 1,
   summary: 'Top sets at RPE 10 on the dumbbell press; one set less.',
-  evidence: { from: '2026-07-20', to: '2026-07-20', sessions: 1 },
+  // The one session sampleState() logged, as the model would read it off the window.
+  evidence: { from: sampleState().workouts[0].d, to: sampleState().workouts[0].d, sessions: 1 },
   changes: [{ id: 'c1', type: 'sets', target: { routineId: 'r1', exId: '0001' }, before: 3, after: 2, why: 'stalls ≥ 2 and every top set at RPE 10' }],
   notes: []
 };
