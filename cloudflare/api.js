@@ -161,8 +161,12 @@ export function createApi(db, env = {}) {
     const routes = {
       'GET /api/health': () => json(200, { ok: true, users: userCount() }),
 
+      // `false` names what this API leaves out (frontend lib/server-features.js), so the app
+      // hides it instead of offering a button that answers 404.
       'GET /api/config': () => json(200, {
         invite_only: !openSignup(), allow_guest: true,
+        push: false, pairing: false, device_link: false,
+        ...(openSignup() ? {} : { signup: false }),
         ...(env.DEFAULT_LANG !== '' ? { default_lang: env.DEFAULT_LANG || 'ko' } : {}),
         ...(session() ? { coach: null } : {}),
       }),

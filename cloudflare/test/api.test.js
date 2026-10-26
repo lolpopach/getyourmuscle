@@ -39,6 +39,9 @@ test('health and config on an empty instance', async () => {
   assert.equal(cfg.allow_guest, true)
   assert.equal(cfg.default_lang, 'ko')
   assert.equal('coach' in cfg, false)
+  // What this API leaves out is named, so the app hides it rather than offering a 404.
+  assert.deepEqual([cfg.push, cfg.pairing, cfg.device_link], [false, false, false])
+  assert.equal('signup' in cfg, false)
   assert.equal((await call('GET', '/api/push/public-key')).status, 404)
 })
 
@@ -58,13 +61,16 @@ test('sign-up options name this address as the relying party, and close once the
   assert.equal((await call('POST', '/api/register/verify', { body: { cid: r.body.cid } })).status, 400)
 
   addUser()
-  assert.equal((await call('GET', '/api/config')).body.invite_only, true)
+  const closed = (await call('GET', '/api/config')).body
+  assert.equal(closed.invite_only, true)
+  assert.equal(closed.signup, false)
   assert.equal((await call('POST', '/api/register/options', { body: { name: 'Someone' } })).status, 403)
 })
 
 test('OPEN_SIGNUP keeps sign-up open after the first profile', async () => {
   const { call, addUser } = setup({ OPEN_SIGNUP: '1' })
   addUser()
+  assert.equal('signup' in (await call('GET', '/api/config')).body, false)
   assert.equal((await call('POST', '/api/register/options', { body: { name: 'Friend' } })).status, 200)
 })
 

@@ -65,6 +65,19 @@ describe('pausing the rest timer', () => {
     expect(posts('/api/push/rest-timer').map(b => b.seconds)).toEqual([90, 70])
   })
 
+  it('books nothing on a server without push (the Cloudflare Worker API)', () => {
+    const config = useStore.getState().config
+    useStore.setState({ config: { push: false } })
+    try {
+      useUI.getState().startRest(90)
+      vi.advanceTimersByTime(20000)
+      useUI.getState().pauseRest()
+      useUI.getState().resumeRest()
+      useUI.getState().stopRest()
+      expect(api).not.toHaveBeenCalled()
+    } finally { useStore.setState({ config }) }
+  })
+
   it('adds and takes off time while paused without booking anything', () => {
     useUI.getState().startRest(60)
     useUI.getState().pauseRest()

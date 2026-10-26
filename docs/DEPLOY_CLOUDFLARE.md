@@ -11,8 +11,10 @@ Browser ──► Cloudflare Worker (one hostname)
 The API (`cloudflare/api.js`) is the app's core of `api/server.js` — passkey sign-up and sign-in,
 sessions, the state document with its revision and conflict rule, Apple Health sync — on a
 SQLite-backed Durable Object, which the first deploy creates by itself. Push notifications,
-photo/video uploads, the AI Coach, admin, pairing, passwords and extra passkeys are not there;
-the app hides them, as it does on any server that lacks them.
+photo/video uploads, the AI Coach, admin, pairing, passwords and extra passkeys are not there,
+and the app hides them: `/api/config` says `push: false`, `pairing: false`, `device_link: false`
+(and `signup: false` once the owner exists; `frontend/src/lib/server-features.js`), and the rest
+the app already leaves out on any server that does not offer it.
 
 - **One owner.** The first profile created can sign up; after it, sign-up is closed. Set the
   Worker variable `OPEN_SIGNUP=1` to keep it open.
