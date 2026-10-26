@@ -53,7 +53,24 @@ export function writeState(dir, uid, S) {
   fs.writeFileSync(path.join(dir, 'state-' + uid + '.json'), JSON.stringify(S));
 }
 
-/** A profile that has consented and has some history — the usual starting point. */
+/* The day `n` days before today, as the YYYY-MM-DD the app writes on a workout.
+ *
+ * The Coach only reads what falls inside windows counted back from the real clock: a review
+ * keeps the last payload.MAX_WEEKS weeks, the cohort the last eight or twelve. A fixture with a
+ * fixed date ('2026-07-20') sat inside them when it was written and aged out of them a few
+ * months later with no code change, so every fixture a window can see is dated relative to today
+ * instead. Worked out exactly as payload.js and cohort.js work out their cut-offs (local
+ * calendar days, then the UTC date), so a fixture n days old is inside any window longer than
+ * n days, in any timezone. */
+export function daysAgo(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+/** A profile that has consented and has some history — the usual starting point. Its one
+ *  workout was two days ago (leaving room to log something after it without dating anything in
+ *  the future), with a weigh-in that day and one nineteen days before. */
 export function sampleState(over = {}) {
   return {
     unit: 'kg', lang: 'en', effort: 'rpe', targetW: 80,
@@ -68,10 +85,10 @@ export function sampleState(over = {}) {
     week: { 1: 'r1', 3: 'r1', 5: 'r1' },
     dayPlan: {},
     exWeights: { '0001': { w: 20 } },
-    bodyweight: [{ d: '2026-07-01', w: 78 }, { d: '2026-07-20', w: 78.5 }],
+    bodyweight: [{ d: daysAgo(21), w: 78 }, { d: daysAgo(2), w: 78.5 }],
     customEx: [],
     workouts: [{
-      id: 'w1', d: '2026-07-20', name: 'Full body A', start: 1000, end: 1000 + 45 * 60000, vol: 600, prs: [],
+      id: 'w1', d: daysAgo(2), name: 'Full body A', start: 1000, end: 1000 + 45 * 60000, vol: 600, prs: [],
       entries: [{
         id: '0001', target: { sets: 3, reps: 10, weight: 20 },
         sets: [{ w: 20, r: 10, done: true, rpe: 9.5 }, { w: 20, r: 9, done: true, rpe: 10 }, { w: 20, r: 8, done: true, rpe: 10 }]
