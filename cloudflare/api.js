@@ -15,7 +15,7 @@
 import crypto from 'node:crypto'
 import { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server'
 import { verifyError } from '../api/verify-error.js'
-import { issueHealthToken, hashHealthToken, parseIngest, mergeIngest, daysFrom } from '../api/health.js'
+import { issueHealthToken, hashHealthToken, ingestToken, parseIngest, mergeIngest, failedIngest, daysFrom } from '../api/health.js'
 
 export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)`,
@@ -60,9 +60,9 @@ async function readBody(request) {
   return body
 }
 
-// Routes that carry their own credential (a WebAuthn challenge id) and so are not tied to the
-// origin check (server.js CSRF_EXEMPT).
-const CSRF_EXEMPT = new Set(['POST /api/register/options', 'POST /api/register/verify', 'POST /api/login/options', 'POST /api/login/verify'])
+// Routes that carry their own credential (a WebAuthn challenge id, the Shortcut's token) and so
+// are not tied to the origin check (server.js CSRF_EXEMPT).
+const CSRF_EXEMPT = new Set(['POST /api/register/options', 'POST /api/register/verify', 'POST /api/login/options', 'POST /api/login/verify', 'POST /api/health/ingest'])
 
 export function createApi(db, env = {}) {
   const one = (sql, ...p) => db.exec(sql, ...p)[0] || null
@@ -306,7 +306,7 @@ export function createApi(db, env = {}) {
         if (!u) return json(401, { error: 'not signed in' })
         const doc = readHealth(u.id)
         const lastSync = Object.values(doc.days || {}).reduce((m, d) => Math.max(m, +d?.at || 0), 0) || null
-        return json(200, { active: !!u.health_h, created: u.health_created || null, lastSync })
+        return json(200, { active: !!u.health_h, created: u.health_created || null, lastSync, last: doc.last || null })
       },
       'POST /api/account/health-token': () => {
         const u = session()
@@ -323,17 +323,19 @@ export function createApi(db, env = {}) {
         return json(200, { active: false })
       },
       'POST /api/health/ingest': async () => {
-        const auth = request.headers.get('authorization') || ''
-        const tok = auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
+        const tok = ingestToken(request.headers.get('authorization'), url.searchParams)
         const u = tok.startsWith('gymh_') && tok.length <= 100 ? one('SELECT * FROM users WHERE health_h = ? AND disabled = 0', hashHealthToken(tok)) : null
         if (!u) return json(401, { error: 'invalid token' })
         const w = healthWrites.get(u.id)
         if (!w || now - w.start > 3600000) healthWrites.set(u.id, { start: now, n: 1 })
         else if (++w.n > HEALTH_WRITES_PER_HOUR) return json(429, { error: 'too many requests' }, { 'Retry-After': String(Math.ceil((w.start + 3600000 - now) / 1000)) })
-        const p = parseIngest(await readBody(request), now)
-        if (p.error) return json(400, { error: p.error })
+        // A bad body or value is recorded, so the app can say what to change in the Shortcut.
+        let p
+        try { p = parseIngest(await readBody(request), now, { tz: url.searchParams.get('tz') || '' }) }
+        catch (e) { if (e instanceof HttpError && e.status === 400) p = { error: e.message }; else throw e }
+        if (p.error) { writeHealth(u.id, failedIngest(readHealth(u.id), p.error, now)); return json(400, { error: p.error }) }
         const doc = mergeIngest(readHealth(u.id), p.date, p.values, now)
-        db.exec('INSERT INTO health (uid, doc) VALUES (?, ?) ON CONFLICT(uid) DO UPDATE SET doc = excluded.doc', u.id, JSON.stringify(doc))
+        writeHealth(u.id, doc)
         return json(200, { ok: true, date: p.date, saved: doc.days[p.date] })
       },
       'GET /api/health/daily': () => {
@@ -345,6 +347,9 @@ export function createApi(db, env = {}) {
       },
     }
 
+    function writeHealth(uid, doc) {
+      db.exec('INSERT INTO health (uid, doc) VALUES (?, ?) ON CONFLICT(uid) DO UPDATE SET doc = excluded.doc', uid, JSON.stringify(doc))
+    }
     function readHealth(uid) {
       const row = one('SELECT doc FROM health WHERE uid = ?', uid)
       try { return row ? JSON.parse(row.doc) : { days: {} } } catch { return { days: {} } }
