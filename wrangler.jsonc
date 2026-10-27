@@ -25,6 +25,7 @@
   // The API runs in this Worker (cloudflare/api.js). Runtime settings live on the Worker itself
   // (dashboard → Settings → Variables and Secrets) and survive Git deploys: OPEN_SIGNUP=1 lets
   // more than the first profile sign up; DEFAULT_LANG (default ko); API_MODE=proxy with
-  // API_ORIGIN sends /api to the Node server in api/ instead.
+  // API_ORIGIN sends /api to the Node server in api/ instead; LUNCH_URL another school's menu
+  // page ('' turns the lunch card off).
   "keep_vars": true
 }

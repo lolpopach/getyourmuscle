@@ -22,6 +22,22 @@ the app already leaves out on any server that does not offer it.
   the app is served on. `RP_ID` / `ORIGIN` variables override them.
 - `DEFAULT_LANG` (default `ko`).
 
+## G-PLAN: school lunch, and Claude working out meals
+
+- **School lunch.** The lunch sheet reads the day's menu off the school's homepage
+  (`api/school-lunch.js`; by default `http://kshcm.net/?menu_no=34`, the 식단표 board) and
+  shows how to eat it. The Worker keeps each month for six hours, and an older copy while the
+  school's site is down. `LUNCH_URL` points it at another withschool.co.kr school's 식단표
+  page; `LUNCH_URL` set to an empty value turns the card off. That page is filled in weeks
+  late; the scheduled Claude session (below) reads the school's monthly menu PDF and sends it,
+  and the card answers from it for the days the page does not have yet.
+- **Meals Claude works out.** A meal is counted from the app's food table the moment it is
+  written. What the table cannot settle, and any photo, waits in an inbox in the Worker's
+  storage for a Claude Code session scheduled on the owner's Claude account, which answers with
+  the numbers and grows a dataset of foods. No AI binding, no API key, nothing billed: the
+  owner issues a token in Settings → *Claude works out meals* and adds it to the Claude
+  environment as `GPLAN_CLAUDE_TOKEN`. The whole procedure: [docs/dev/CLAUDE_MEALS.md](dev/CLAUDE_MEALS.md).
+
 ## Deploy on every push (Cloudflare Git builds)
 
 Workers & Pages → the Worker → Settings → Build, connected to this repository:

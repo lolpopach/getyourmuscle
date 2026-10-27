@@ -31,6 +31,7 @@ import { passwordOn, PasswordRow, openPasswordSignIn, openPasswordRegister } fro
 import { usePasskeys, PasskeysRow, DeviceLinkRow } from '../components/Passkeys.jsx'
 import { serverHas } from '../lib/server-features.js'
 import { AppleHealthRow } from '../components/AppleHealth.jsx'
+import { ClaudeLinkRow } from '../components/ClaudeLink.jsx'
 import { gplanSetupSheet, bodycompSheet } from '../components/GplanSetup.jsx'
 import { Section, Row, SelectRow, Switch, Segmented, Button, TextField } from '../components/ui.jsx'
 
@@ -307,6 +308,7 @@ export default function Settings() {
         <PasskeysRow state={passkeys.st} changed={credsChanged} />
         <DeviceLinkRow state={passkeys.st} />
         <AppleHealthRow />
+        <ClaudeLinkRow />
         {serverHas(config, 'pairing') && <Row icon="link" iconTint="var(--blue)" title={t('Pair the mobile app')} subtitle={t('Connect the G-PLAN app on your phone to this account.')} accessory="chevron"
           onClick={() => useUI.getState().openSheet(close => <PairSheet close={close} />)} />}
         {pwOn && <PasswordRow version={credsV} />}
