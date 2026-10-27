@@ -1658,7 +1658,7 @@ paths:
           description: One serving each.
           content:
             application/json:
-              schema: { type: object, properties: { foods: { type: array, items: { type: object, properties: { name: { type: string }, cat: { type: string, enum: [rice, noodle, soup, stew, main, side, kimchi, free, fruit, dairy, dessert, drink], description: How the lunch planner portions it; main when left out. }, g: { type: integer, description: One serving's weight. }, kcal: { type: integer }, p: { type: number }, c: { type: number }, f: { type: number }, note: { type: string }, at: { type: integer } } } } } }
+              schema: { type: object, properties: { foods: { type: array, items: { type: object, properties: { name: { type: string }, cat: { type: string, enum: [rice, noodle, soup, stew, main, side, kimchi, free, fruit, dairy, dessert, drink], description: How the lunch planner portions it; main when left out. }, g: { type: integer, description: One serving's weight. }, kcal: { type: integer }, p: { type: number }, c: { type: number }, f: { type: number }, note: { type: string }, tray: { type: string, format: date, description: The school lunch day whose tray photo this serving was checked against. }, at: { type: integer } } } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /api/claude/inbox:
@@ -1744,7 +1744,7 @@ paths:
           description: One serving each.
           content:
             application/json:
-              schema: { type: object, properties: { foods: { type: array, items: { type: object, properties: { name: { type: string }, cat: { type: string, enum: [rice, noodle, soup, stew, main, side, kimchi, free, fruit, dairy, dessert, drink], description: How the lunch planner portions it; main when left out. }, g: { type: integer, description: One serving's weight. }, kcal: { type: integer }, p: { type: number }, c: { type: number }, f: { type: number }, note: { type: string }, at: { type: integer } } } } } }
+              schema: { type: object, properties: { foods: { type: array, items: { type: object, properties: { name: { type: string }, cat: { type: string, enum: [rice, noodle, soup, stew, main, side, kimchi, free, fruit, dairy, dessert, drink], description: How the lunch planner portions it; main when left out. }, g: { type: integer, description: One serving's weight. }, kcal: { type: integer }, p: { type: number }, c: { type: number }, f: { type: number }, note: { type: string }, tray: { type: string, format: date, description: The school lunch day whose tray photo this serving was checked against. }, at: { type: integer } } } } } }
         '401':
           description: No token, or not a valid one.
           content:
@@ -1760,7 +1760,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { type: object, properties: { foods: { type: array, maxItems: 300, items: { type: object, properties: { name: { type: string }, cat: { type: string, enum: [rice, noodle, soup, stew, main, side, kimchi, free, fruit, dairy, dessert, drink], description: How the lunch planner portions it; main when left out. }, g: { type: integer, description: One serving's weight. }, kcal: { type: integer }, p: { type: number }, c: { type: number }, f: { type: number }, note: { type: string }, at: { type: integer } } } } } }
+            schema: { type: object, properties: { foods: { type: array, maxItems: 300, items: { type: object, properties: { name: { type: string }, cat: { type: string, enum: [rice, noodle, soup, stew, main, side, kimchi, free, fruit, dairy, dessert, drink], description: How the lunch planner portions it; main when left out. }, g: { type: integer, description: One serving's weight. }, kcal: { type: integer }, p: { type: number }, c: { type: number }, f: { type: number }, note: { type: string }, tray: { type: string, format: date, description: The school lunch day whose tray photo this serving was checked against. }, at: { type: integer } } } } } }
       responses:
         '200':
           description: Merged.

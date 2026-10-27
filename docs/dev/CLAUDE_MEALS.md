@@ -126,6 +126,7 @@ node scripts/gplan-claude.mjs learn /tmp/gplan-foods.json
 - `g` is the weight of that one serving, `cat` how the app portions it: `rice`, `noodle`, `soup`,
   `stew`, `main` (a protein dish), `side` (반찬), `kimchi`, `fruit`, `dairy`, `dessert`, `drink`,
   `free` (lettuce, plain vegetables). Left out, it is `main`.
+- `tray` (school lunch dishes only): the day whose tray photo the serving was checked against.
 - Never add a name the table already matches `exact`: the dataset is looked up first, so it would
   replace the table's row everywhere.
 - The same name again replaces the earlier entry — correct a food by sending it again.
@@ -133,18 +134,28 @@ node scripts/gplan-claude.mjs learn /tmp/gplan-foods.json
 ### 4. The school lunch
 
 ```bash
-node scripts/gplan-claude.mjs lunch 7 /tmp/gplan-lunch
-node scripts/gplan-claude.mjs lunch 3 /tmp/gplan-lunch 2026-10-13   # from a given day
+node scripts/gplan-claude.mjs lunch /tmp/gplan-lunch
+node scripts/gplan-claude.mjs lunch /tmp/gplan-lunch 2026-10-01 2026-10-31   # a given range
 ```
 
-For each school day: the dishes as the lunch sheet reads them, how the table matched each, the
-`unknown` ones (not `exact` and not in the dataset), and `trayPhoto` — the school's own photo of
-that day's tray, saved locally once the school has posted it (usually after the meal; look back a
-few days for recent ones). For each unknown dish, work out one school serving — the tray photos
-show the school's portions — and add it with step 3's format and the right `cat` (the lunch
-planner raises protein dishes, keeps rice, trims dessert and starchy sides, so a 반찬 filed as
-`main` would be portioned wrongly). Dishes from the self-serve counter (`extraCounter: true`) are
-optional extras; work them out the same way. Nothing to send when no dish is unknown.
+The school posts its tray photos irregularly — often several weeks' worth at once, long after the
+meals. So every run looks from the 1st of last month to a week ahead, and lists only the days with
+work left (`days`; `daysWithWork: 0` means nothing to do). Each day has `menu` (all its dishes, to
+tell the tray's compartments apart), `trayPhoto` (the school's photo, saved locally, or `null`
+while not posted) and `work`:
+
+- `todo: "work-out"` — a dish the table does not know (`tableGuess` is its guess). Work out one
+  school serving. With a tray photo, judge the serving from it and send `"tray": "<that date>"`;
+  without one (a coming day, or a photo not posted yet), work it out from the menu and send no
+  `tray` — it comes back as `check-photo` once the photo appears.
+- `todo: "check-photo"` — a dish already in the dataset that was worked out without a photo, and
+  the school has since posted one. Look at the photo, correct the serving if it is off, and send
+  it again with `"tray": "<that date>"` (even when nothing changed — that is what marks it done).
+
+Send everything with step 3's `learn`, with the right `cat`: the lunch planner raises protein
+dishes, keeps rice and trims dessert and starchy sides, so a 반찬 filed as `main` would be
+portioned wrongly. Dishes from the self-serve counter (`extraCounter: true`) are optional extras;
+work them out the same way. Every listed dish must be sent, or the next run lists it again.
 
 ### 5. Finish
 

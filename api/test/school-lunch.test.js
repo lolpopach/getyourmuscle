@@ -65,8 +65,8 @@ test('an inbox entry, a result and the dataset, bounded', () => {
   assert.match(parseResult({ id: 'm0001', items: [] }).error, /1–30/);
   assert.match(parseResult({ id: 'm0001', items: [{ name: 'x' }] }).error, /kcal/);
 
-  const m = mergeFoods({ foods: [{ name: '마라탕', g: 600, kcal: 650 }] }, [{ name: '마 라 탕', cat: 'stew', g: 600, kcal: 700, p: 32 }, { name: '꿔바로우', cat: 'spicy', g: 200, kcal: 520 }], 9);
-  assert.deepEqual(m.doc.foods.map(f => [f.name, f.cat, f.kcal, f.at]), [['마 라 탕', 'stew', 700, 9], ['꿔바로우', 'main', 520, 9]]);
+  const m = mergeFoods({ foods: [{ name: '마라탕', g: 600, kcal: 650 }] }, [{ name: '마 라 탕', cat: 'stew', g: 600, kcal: 700, p: 32 }, { name: '꿔바로우', cat: 'spicy', g: 200, kcal: 520, tray: '2026-10-06' }, { name: '두부조림', cat: 'side', g: 80, kcal: 110, tray: 'yesterday' }], 9);
+  assert.deepEqual(m.doc.foods.map(f => [f.name, f.cat, f.kcal, f.tray, f.at]), [['마 라 탕', 'stew', 700, undefined, 9], ['꿔바로우', 'main', 520, '2026-10-06', 9], ['두부조림', 'side', 110, undefined, 9]]);
   assert.match(mergeFoods({}, [{ name: '꿔바로우', kcal: 520 }]).error, /g \(one serving/);
   assert.equal(normName('돈까스 * 브라운소스'), '돈까스브라운소스');
 });

@@ -6,10 +6,12 @@
 //   node scripts/gplan-claude.mjs answer file.json   send the worked-out meals back
 //   node scripts/gplan-claude.mjs foods              the dataset of foods worked out so far
 //   node scripts/gplan-claude.mjs learn file.json    add or replace foods in the dataset
-//   node scripts/gplan-claude.mjs lunch [days] [dir] [from]
-//                                                    the school lunches from today (or from
-//                                                    YYYY-MM-DD): dishes the table does not know,
-//                                                    and the day's tray photo once posted
+//   node scripts/gplan-claude.mjs lunch [dir] [from] [to]
+//                                                    the school lunches from the 1st of last month
+//                                                    to a week ahead (or from/to YYYY-MM-DD), only
+//                                                    the days with work left: dishes the table does
+//                                                    not know, and dataset dishes not yet checked
+//                                                    against a tray photo posted since
 //
 // GPLAN_CLAUDE_TOKEN is the token from G-PLAN's Settings → "Claude works out meals"; GPLAN_URL
 // the server (the owner's Worker by default). Every answer is JSON on stdout; a problem is one
@@ -19,7 +21,7 @@
 // so an answer can stay consistent with the numbers the app shows for the same dish.
 import fs from 'node:fs'
 import path from 'node:path'
-import { findFood, setMyFoods } from '../frontend/src/lib/foods.js'
+import { findFood, normName, setMyFoods } from '../frontend/src/lib/foods.js'
 import { rowsFromText } from '../frontend/src/lib/food-text.js'
 import { rowFood, rowNutrition, rowServings } from '../frontend/src/lib/food-calc.js'
 import { parseMenu } from '../frontend/src/lib/lunch.js'
@@ -90,11 +92,16 @@ function savePhoto(dir, name, dataUrl) {
   return file
 }
 
-// A day in the owner's time zone: today, or `offset` days after `from`.
-function localDay(offset = 0, from = null) {
-  if (from) return new Date(Date.parse(from + 'T00:00:00Z') + offset * 86400000).toISOString().slice(0, 10)
+// A day in the owner's time zone, `offset` days from today.
+function localDay(offset = 0) {
   const d = new Date(Date.now() + offset * 86400000)
   return new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
+}
+const isDayStr = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '') && !Number.isNaN(Date.parse(d + 'T00:00:00Z'))
+const nextDay = d => new Date(Date.parse(d + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10)
+const firstOfLastMonth = d => {
+  const [y, m] = d.split('-').map(Number)
+  return m === 1 ? `${y - 1}-12-01` : `${y}-${String(m - 1).padStart(2, '0')}-01`
 }
 
 const commands = {
@@ -149,41 +156,63 @@ const commands = {
     out(r)
   },
 
-  async lunch(days = '7', dir = 'gplan-lunch', from = null) {
-    const n = Math.min(31, Math.max(1, parseInt(days, 10) || 7))
-    if (from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) fail('from must be YYYY-MM-DD')
-    if (TOKEN) await loadDataset()
+  // The school posts its tray photos when it gets round to it — often several weeks at once — so
+  // every run looks back to the 1st of last month. What was already done is not handed out again:
+  // a dish in the dataset carries `tray`, the day whose photo it was checked against.
+  async lunch(dir = 'gplan-lunch', from = null, to = null) {
+    for (const d of [from, to]) if (d && !isDayStr(d)) fail('from and to must be YYYY-MM-DD')
+    const mine = new Map()
+    if (TOKEN) for (const f of await loadDataset()) mine.set(normName(f.name), f)
     const base = lunchUrl(process.env)
     if (!base) fail('LUNCH_URL is empty: no school menu to read.')
-    const dates = Array.from({ length: n }, (_, i) => localDay(i, from))
+    const start = from || firstOfLastMonth(localDay())
+    const end = to || localDay(7)
+    if (end < start) fail('to is before from')
+    const dates = []
+    for (let d = start; d <= end && dates.length < 120; d = nextDay(d)) dates.push(d)
     const months = {}
     for (const m of new Set(dates.map(d => d.slice(0, 7)))) {
       months[m] = await fetchMonth(base, m)
       if (months[m].error) fail(`School menu for ${m}: ${months[m].error}`, 3)
     }
-    const result = []
+    const days = []
+    let schoolDays = 0, trayPhotos = 0
     for (const date of dates) {
       const doc = months[date.slice(0, 7)]
       const meal = (doc.days[date] || []).find(x => /중식|점심|lunch/i.test(x.label)) || (doc.days[date] || [])[0]
       if (!meal) continue
-      let tray = null
-      if (doc.photos?.[date]) {
-        try {
-          const res = await fetch(doc.photos[date], { signal: AbortSignal.timeout(20000) })
-          if (res.ok) {
-            fs.mkdirSync(dir, { recursive: true })
-            tray = path.resolve(dir, `lunch-${date}.jpg`)
-            fs.writeFileSync(tray, Buffer.from(await res.arrayBuffer()))
-          }
-        } catch { /* the photo is a help, not a need */ }
-      }
+      schoolDays++
+      const photoUrl = doc.photos?.[date] || null
+      if (photoUrl) trayPhotos++
       const dishes = parseMenu(meal.dishes).map(d => {
         const m = findFood(d.name)
-        return { written: d.raw, name: d.name, extraCounter: d.extra, food: m?.food.name ?? null, how: m?.how ?? null, cat: m?.food.cat ?? null, g: m?.food.g ?? null, kcal: m?.food.kcal ?? null }
+        const own = m?.how === 'mine' ? mine.get(normName(m.food.name)) || null : null
+        return { name: d.name, written: d.raw, extraCounter: d.extra, how: m?.how ?? null, food: m?.food ?? null, own }
       })
-      result.push({ date, label: meal.label, trayPhoto: tray, trayPhotoUrl: doc.photos?.[date] || null, dishes, unknown: dishes.filter(d => !['exact', 'mine'].includes(d.how)).map(d => d.name) })
+      const work = []
+      for (const d of dishes) {
+        const table = d.food && { food: d.food.name, cat: d.food.cat, g: d.food.g, kcal: d.food.kcal, p: d.food.p, c: d.food.c, f: d.food.f }
+        // Not known yet: work it out (with the photo when there is one).
+        if (d.how !== 'exact' && d.how !== 'mine') work.push({ name: d.name, written: d.written, extraCounter: d.extraCounter, todo: 'work-out', tableGuess: { how: d.how, ...table } })
+        // Worked out from the menu alone, and now there is a photo: check the serving against it.
+        else if (d.how === 'mine' && photoUrl && !d.own?.tray) work.push({ name: d.name, written: d.written, extraCounter: d.extraCounter, todo: 'check-photo', dataset: d.own || table })
+      }
+      if (!work.length) continue
+      let trayPhoto = null
+      if (photoUrl) {
+        try {
+          const res = await fetch(photoUrl, { signal: AbortSignal.timeout(20000) })
+          if (res.ok) {
+            fs.mkdirSync(dir, { recursive: true })
+            const ext = (/\.(jpe?g|png|webp)$/i.exec(new URL(photoUrl).pathname)?.[1] || 'jpg').toLowerCase()
+            trayPhoto = path.resolve(dir, `lunch-${date}.${ext}`)
+            fs.writeFileSync(trayPhoto, Buffer.from(await res.arrayBuffer()))
+          }
+        } catch { /* the photo is a help, not a need: the dishes are still listed */ }
+      }
+      days.push({ date, label: meal.label, trayPhoto, trayPhotoUrl: photoUrl, menu: dishes.map(d => d.name), work })
     }
-    out({ from: dates[0], days: result })
+    out({ from: start, to: end, schoolDays, trayPhotos, daysWithWork: days.length, days })
   },
 }
 
