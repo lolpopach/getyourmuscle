@@ -12,10 +12,10 @@ const APPROVED = {
   // [id, sets, reps] here; the rest of G-PLAN's prescription is pinned in its own block below.
   'gplan-solid': [
     [1, '상체 A · 가슴 어깨', [['0314', 4, 10], ['0025', 3, 8], ['0405', 3, 10], ['0334', 4, 15], ['0179', 3, 15], ['0194', 3, 12], ['3666', 1, undefined]]],
-    [2, '상체 B · 등', [['2330', 4, 10], ['0027', 3, 10], ['0861', 3, 12], ['0203', 3, 15], ['0178', 3, 15], ['0447', 3, 10], ['3666', 1, undefined]]],
-    [4, '하체 · 스쿼트', [['0043', 4, 8], ['0085', 3, 10], ['0739', 3, 12], ['0586', 3, 12], ['0585', 2, 15], ['0594', 3, 15], ['0472', 3, 12], ['3666', 1, undefined]]],
-    [5, '팔 · 어깨', [['0030', 3, 10], ['0031', 3, 10], ['0060', 3, 12], ['0318', 3, 12], ['0334', 4, 15], ['0200', 3, 12], ['0313', 3, 12], ['3666', 1, undefined]]],
-    [6, '상체 볼륨 (선택)', [['0757', 3, 12], ['0292', 3, 12], ['0179', 3, 15], ['0334', 3, 15], ['0378', 3, 15]]],
+    [2, '하체 A · 스쿼트', [['0043', 4, 8], ['0085', 3, 10], ['0739', 2, 12], ['0586', 3, 12], ['0594', 3, 15], ['0472', 3, 12], ['3666', 1, undefined]]],
+    [4, '상체 B · 등', [['2330', 4, 10], ['0027', 3, 10], ['0861', 3, 12], ['0203', 3, 15], ['0178', 3, 15], ['0447', 3, 10], ['3666', 1, undefined]]],
+    [5, '하체 B · 레그프레스', [['0410', 3, 10], ['0739', 3, 12], ['0599', 3, 12], ['0585', 2, 15], ['0334', 3, 15], ['0605', 3, 15], ['0175', 3, 15], ['3666', 1, undefined]]],
+    [6, '팔 · 어깨', [['0030', 3, 10], ['0031', 3, 10], ['0060', 3, 12], ['0318', 3, 12], ['0334', 4, 15], ['0200', 3, 12], ['0313', 3, 12]]],
   ],
   ppl: [
     [1, 'Push Day', [['0025', 4, 8], ['0047', 3, 10], ['0426', 3, 10], ['0334', 3, 12], ['0241', 3, 12], ['0251', 3, 10]]],
@@ -110,14 +110,13 @@ const FLY = '아래에서 위로 — 윗가슴'
 const GPLAN_FULL = [
   [['0314', 8, 10, 150, 2, LEFT], ['0025', 6, 8, 150], ['0405', 8, 10, 120, 0, LEFT], ['0334', 12, 15, 75, 0, SMALL],
     ['0179', 12, 15, 75, 0, FLY], ['0194', 10, 12, 75]],
+  [['0043', 6, 8, 180, 2], ['0085', 8, 10, 150], ['0739', 10, 12, 120], ['0586', 10, 12, 75], ['0594', 12, 15, 60], ['0472', 10, 12, 60]],
   [['2330', 8, 10, 120, 2], ['0027', 8, 10, 150], ['0861', 10, 12, 90], ['0203', 12, 15, 60], ['0178', 12, 15, 60, 0, SMALL],
     ['0447', 8, 10, 75]],
-  [['0043', 6, 8, 180, 2], ['0085', 8, 10, 150], ['0739', 10, 12, 120], ['0586', 10, 12, 75], ['0585', 12, 15, 60],
-    ['0594', 12, 15, 60], ['0472', 10, 12, 60]],
+  [['0410', 8, 10, 120, 2, '다리마다 · 왼다리부터, 오른다리는 같은 횟수까지'], ['0739', 10, 12, 120], ['0599', 10, 12, 75], ['0585', 12, 15, 60],
+    ['0334', 12, 15, 60, 0, SMALL], ['0605', 12, 15, 60], ['0175', 12, 15, 60]],
   [['0030', 8, 10, 120, 2], ['0031', 8, 10, 90], ['0060', 10, 12, 75], ['0318', 10, 12, 75, 0, LEFT], ['0334', 12, 15, 60, 0, SMALL],
     ['0200', 10, 12, 60], ['0313', 10, 12, 60, 0, LEFT]],
-  [['0757', 10, 12, 120, 2], ['0292', 10, 12, 75, 0, '한 팔씩 · 왼팔부터, 횟수는 한 팔 기준'], ['0179', 12, 15, 75, 0, FLY],
-    ['0334', 12, 15, 60, 0, SMALL], ['0378', 12, 15, 60]],
 ]
 
 describe('G-PLAN Solid Build, as prescribed', () => {
@@ -138,26 +137,28 @@ describe('G-PLAN Solid Build, as prescribed', () => {
     }
   })
 
-  it('ends the four main days with the incline walk, and leaves Saturday’s running day without it', () => {
+  it('ends the four weekday sessions with the incline walk, and leaves Saturday’s running day without it', () => {
     const walk = { id: '3666', sets: 1, min: 20, speed: 5, note: '경사 10~12% · 하루 걸음 수 채우기' }
     routines.slice(0, 4).forEach(r => expect(r.ex.at(-1)).toEqual(walk))
     expect(routines[4].ex.some(e => isCardio(e.id))).toBe(false)
     expect(routines.flatMap(r => r.ex.slice(0, -1)).filter(e => isCardio(e.id)).length).toBe(0)
   })
 
-  // One leg day and more arms (the user's ask, 2026-10-27) — and no arm muscle trained two days
+  // More arms (the user's ask, 2026-10-27) and the legs growing too (the next one, same day):
+  // two leg days, 12 sets each for biceps and triceps, and no muscle group trained two days
   // running, so each one comes to its next session recovered.
-  it('has one leg day, 12 sets each for biceps and triceps, and never trains an arm two days running', () => {
+  it('has two leg days, 12 sets each for biceps and triceps, and never trains a group two days running', () => {
     const { routines, schedule } = buildStarterPlan('gplan-solid')
     const dayOf = Object.fromEntries(schedule.map(({ day, routineId }) => [routineId, day]))
     const legDays = routines.filter(r => r.ex.some(e => EXIDX[e.id].bp === 'upper legs'))
-    expect(legDays.map(r => r.name)).toEqual(['하체 · 스쿼트'])
+    expect(legDays.map(r => r.name)).toEqual(['하체 A · 스쿼트', '하체 B · 레그프레스'])
+    const daysWith = has => routines.filter(r => r.ex.some(has)).map(r => dayOf[r.id]).sort((a, b) => a - b)
+    const apart = (days, what) => days.slice(1).forEach((d, i) => expect(d - days[i], what + ' on back-to-back days').toBeGreaterThan(1))
+    apart(daysWith(e => EXIDX[e.id].bp === 'upper legs'), 'legs')
     for (const muscle of ['biceps', 'triceps']) {
-      const hits = routines.filter(r => r.ex.some(e => EXIDX[e.id].tg === muscle))
-      const sets = hits.flatMap(r => r.ex).filter(e => EXIDX[e.id].tg === muscle).reduce((n, e) => n + e.sets, 0)
+      const sets = routines.flatMap(r => r.ex).filter(e => EXIDX[e.id].tg === muscle).reduce((n, e) => n + e.sets, 0)
       expect(sets, muscle).toBe(12)
-      const days = hits.map(r => dayOf[r.id]).sort((a, b) => a - b)
-      days.slice(1).forEach((d, i) => expect(d - days[i], muscle + ' on back-to-back days').toBeGreaterThan(1))
+      apart(daysWith(e => EXIDX[e.id].tg === muscle), muscle)
     }
   })
 
