@@ -6,12 +6,11 @@
 //   node scripts/gplan-claude.mjs answer file.json   send the worked-out meals back
 //   node scripts/gplan-claude.mjs foods              the dataset of foods worked out so far
 //   node scripts/gplan-claude.mjs learn file.json    add or replace foods in the dataset
-//   node scripts/gplan-claude.mjs lunch [dir] [from] [to]
-//                                                    the school lunches from the 1st of last month
-//                                                    to a week ahead (or from/to YYYY-MM-DD), only
-//                                                    the days with work left: dishes the table does
-//                                                    not know, and dataset dishes not yet checked
-//                                                    against a tray photo posted since
+//   node scripts/gplan-claude.mjs lunch [dir] [from] [days]
+//                                                    the school lunches from today (or YYYY-MM-DD)
+//                                                    for a week (or `days`): the dishes the table
+//                                                    does not know, and the latest tray photos as
+//                                                    a reference for the school's portions
 //
 // GPLAN_CLAUDE_TOKEN is the token from G-PLAN's Settings → "Claude works out meals"; GPLAN_URL
 // the server (the owner's Worker by default). Every answer is JSON on stdout; a problem is one
@@ -21,7 +20,7 @@
 // so an answer can stay consistent with the numbers the app shows for the same dish.
 import fs from 'node:fs'
 import path from 'node:path'
-import { findFood, normName, setMyFoods } from '../frontend/src/lib/foods.js'
+import { findFood, setMyFoods } from '../frontend/src/lib/foods.js'
 import { rowsFromText } from '../frontend/src/lib/food-text.js'
 import { rowFood, rowNutrition, rowServings } from '../frontend/src/lib/food-calc.js'
 import { parseMenu } from '../frontend/src/lib/lunch.js'
@@ -99,6 +98,7 @@ function localDay(offset = 0) {
 }
 const isDayStr = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '') && !Number.isNaN(Date.parse(d + 'T00:00:00Z'))
 const nextDay = d => new Date(Date.parse(d + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10)
+// The 1st of the month before `d`'s: where the reference tray photos are looked for.
 const firstOfLastMonth = d => {
   const [y, m] = d.split('-').map(Number)
   return m === 1 ? `${y - 1}-12-01` : `${y}-${String(m - 1).padStart(2, '0')}-01`
@@ -156,63 +156,57 @@ const commands = {
     out(r)
   },
 
-  // The school posts its tray photos when it gets round to it — often several weeks at once — so
-  // every run looks back to the 1st of last month. What was already done is not handed out again:
-  // a dish in the dataset carries `tray`, the day whose photo it was checked against.
-  async lunch(dir = 'gplan-lunch', from = null, to = null) {
-    for (const d of [from, to]) if (d && !isDayStr(d)) fail('from and to must be YYYY-MM-DD')
-    const mine = new Map()
-    if (TOKEN) for (const f of await loadDataset()) mine.set(normName(f.name), f)
+  // Every run checks the menus from today on, so each day's lunch is counted before it is eaten.
+  // The school posts its tray photos irregularly, weeks at once, so they are not matched to days:
+  // the latest few show how much a tray usually holds — the reference for a school serving.
+  async lunch(dir = 'gplan-lunch', from = null, days = '7') {
+    if (from && !isDayStr(from)) fail('from must be YYYY-MM-DD')
+    const n = Math.min(31, Math.max(1, parseInt(days, 10) || 7))
+    if (TOKEN) await loadDataset()
     const base = lunchUrl(process.env)
     if (!base) fail('LUNCH_URL is empty: no school menu to read.')
-    const start = from || firstOfLastMonth(localDay())
-    const end = to || localDay(7)
-    if (end < start) fail('to is before from')
-    const dates = []
-    for (let d = start; d <= end && dates.length < 120; d = nextDay(d)) dates.push(d)
+    const start = from || localDay()
+    const dates = [start]
+    while (dates.length < n) dates.push(nextDay(dates.at(-1)))
+    // The menus of these days, and last month's for the photos.
     const months = {}
-    for (const m of new Set(dates.map(d => d.slice(0, 7)))) {
+    for (const m of new Set([firstOfLastMonth(start).slice(0, 7), ...dates.map(d => d.slice(0, 7))])) {
       months[m] = await fetchMonth(base, m)
       if (months[m].error) fail(`School menu for ${m}: ${months[m].error}`, 3)
     }
-    const days = []
-    let schoolDays = 0, trayPhotos = 0
-    for (const date of dates) {
-      const doc = months[date.slice(0, 7)]
-      const meal = (doc.days[date] || []).find(x => /중식|점심|lunch/i.test(x.label)) || (doc.days[date] || [])[0]
-      if (!meal) continue
-      schoolDays++
-      const photoUrl = doc.photos?.[date] || null
-      if (photoUrl) trayPhotos++
-      const dishes = parseMenu(meal.dishes).map(d => {
-        const m = findFood(d.name)
-        const own = m?.how === 'mine' ? mine.get(normName(m.food.name)) || null : null
-        return { name: d.name, written: d.raw, extraCounter: d.extra, how: m?.how ?? null, food: m?.food ?? null, own }
-      })
-      const work = []
-      for (const d of dishes) {
-        const table = d.food && { food: d.food.name, cat: d.food.cat, g: d.food.g, kcal: d.food.kcal, p: d.food.p, c: d.food.c, f: d.food.f }
-        // Not known yet: work it out (with the photo when there is one).
-        if (d.how !== 'exact' && d.how !== 'mine') work.push({ name: d.name, written: d.written, extraCounter: d.extraCounter, todo: 'work-out', tableGuess: { how: d.how, ...table } })
-        // Worked out from the menu alone, and now there is a photo: check the serving against it.
-        else if (d.how === 'mine' && photoUrl && !d.own?.tray) work.push({ name: d.name, written: d.written, extraCounter: d.extraCounter, todo: 'check-photo', dataset: d.own || table })
-      }
-      if (!work.length) continue
-      let trayPhoto = null
-      if (photoUrl) {
-        try {
-          const res = await fetch(photoUrl, { signal: AbortSignal.timeout(20000) })
-          if (res.ok) {
-            fs.mkdirSync(dir, { recursive: true })
-            const ext = (/\.(jpe?g|png|webp)$/i.exec(new URL(photoUrl).pathname)?.[1] || 'jpg').toLowerCase()
-            trayPhoto = path.resolve(dir, `lunch-${date}.${ext}`)
-            fs.writeFileSync(trayPhoto, Buffer.from(await res.arrayBuffer()))
-          }
-        } catch { /* the photo is a help, not a need: the dishes are still listed */ }
-      }
-      days.push({ date, label: meal.label, trayPhoto, trayPhotoUrl: photoUrl, menu: dishes.map(d => d.name), work })
+    const lunchOf = date => {
+      const list = months[date.slice(0, 7)]?.days[date] || []
+      return list.find(x => /중식|점심|lunch/i.test(x.label)) || list[0] || null
     }
-    out({ from: start, to: end, schoolDays, trayPhotos, daysWithWork: days.length, days })
+    const out_ = []
+    for (const date of dates) {
+      const meal = lunchOf(date)
+      if (!meal) continue
+      const work = parseMenu(meal.dishes).map(d => ({ d, m: findFood(d.name) }))
+        .filter(({ m }) => m?.how !== 'exact' && m?.how !== 'mine')
+        .map(({ d, m }) => ({ name: d.name, written: d.raw, extraCounter: d.extra, tableGuess: m && { how: m.how, food: m.food.name, cat: m.food.cat, g: m.food.g, kcal: m.food.kcal, p: m.food.p } }))
+      out_.push({ date, label: meal.label, menu: parseMenu(meal.dishes).map(d => d.name), unknown: work })
+    }
+    const toDo = out_.some(d => d.unknown.length)
+    // The latest posted tray photos, with their menus to tell the compartments apart — fetched
+    // only when there is a dish to work out.
+    const reference = []
+    if (toDo) {
+      const posted = Object.values(months).flatMap(m => Object.entries(m.photos || {})).filter(([d]) => d <= start).sort(([a], [b]) => (a < b ? 1 : -1))
+      for (const [date, url] of posted) {
+        if (reference.length >= 3) break
+        try {
+          const res = await fetch(url, { signal: AbortSignal.timeout(20000) })
+          if (!res.ok) continue
+          fs.mkdirSync(dir, { recursive: true })
+          const ext = (/\.(jpe?g|png|webp)$/i.exec(new URL(url).pathname)?.[1] || 'jpg').toLowerCase()
+          const file = path.resolve(dir, `tray-${date}.${ext}`)
+          fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()))
+          reference.push({ date, menu: parseMenu(lunchOf(date)?.dishes || []).map(d => d.name), file })
+        } catch { /* one photo fewer to go by */ }
+      }
+    }
+    out({ from: start, to: dates.at(-1), schoolDays: out_.length, unknownDishes: out_.reduce((t, d) => t + d.unknown.length, 0), days: out_, referenceTrays: reference })
   },
 }
 

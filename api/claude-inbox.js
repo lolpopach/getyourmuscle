@@ -94,10 +94,8 @@ export function parseResult(body) {
 
 /**
  * Foods Claude worked out, merged into the dataset ({ foods: [...] }) by name: one serving each,
- * `g` its weight, `cat` one of FOOD_CATS (a main dish when left out), `tray` the school lunch day
- * whose tray photo the serving was checked against. The school posts those photos irregularly,
- * several weeks at once, so a dish worked out from the menu alone is looked at again once a photo
- * of it appears. A name already there is replaced (a better answer wins); the newest last.
+ * `g` its weight, `cat` one of FOOD_CATS (a main dish when left out). A name already there is
+ * replaced (a better answer wins); the newest last.
  */
 export function mergeFoods(doc, foods, now = Date.now()) {
   const list = Array.isArray(foods) ? foods.slice(0, 300) : [];
@@ -107,7 +105,7 @@ export function mergeFoods(doc, foods, now = Date.now()) {
     const kcal = num(f?.kcal, 5000);
     const g = num(f?.g, 3000);
     if (!name || kcal == null || !g) return { error: 'every food needs a name, kcal and g (one serving\'s weight)' };
-    add.push({ name, cat: FOOD_CATS.includes(f.cat) ? f.cat : 'main', g: Math.round(g), kcal: Math.round(kcal), p: Math.round((num(f.p, 500) || 0) * 10) / 10, c: Math.round((num(f.c, 800) || 0) * 10) / 10, f: Math.round((num(f.f, 500) || 0) * 10) / 10, note: str(f.note, 120), ...(isDay(f.tray) ? { tray: f.tray } : {}), at: now });
+    add.push({ name, cat: FOOD_CATS.includes(f.cat) ? f.cat : 'main', g: Math.round(g), kcal: Math.round(kcal), p: Math.round((num(f.p, 500) || 0) * 10) / 10, c: Math.round((num(f.c, 800) || 0) * 10) / 10, f: Math.round((num(f.f, 500) || 0) * 10) / 10, note: str(f.note, 120), at: now });
   }
   const keys = new Set(add.map(x => normName(x.name)));
   const kept = (Array.isArray(doc?.foods) ? doc.foods : []).filter(x => !keys.has(normName(x?.name)));

@@ -6,8 +6,8 @@ also goes into an **inbox**. A Claude Code session, scheduled on the owner's own
 (no API key, no paid API), reads that inbox a few times a day, works the nutrition out, writes the
 answer back and adds each new food to a **dataset**. The app replaces the table's numbers with the
 answer, and looks the dataset up before its own table, so a food worked out once is counted
-instantly afterwards. The same session reads the school lunch menu and the tray photos the school
-posts, and adds the dishes the table does not know.
+instantly afterwards. The same session checks the school lunch menu every day, and adds the
+dishes the table does not know, sized by the tray photos the school posts.
 
 ```
 G-PLAN app ── POST /api/inbox ──▶ server inbox ◀── GET /api/claude/inbox ── scheduled Claude
@@ -126,7 +126,6 @@ node scripts/gplan-claude.mjs learn /tmp/gplan-foods.json
 - `g` is the weight of that one serving, `cat` how the app portions it: `rice`, `noodle`, `soup`,
   `stew`, `main` (a protein dish), `side` (반찬), `kimchi`, `fruit`, `dairy`, `dessert`, `drink`,
   `free` (lettuce, plain vegetables). Left out, it is `main`.
-- `tray` (school lunch dishes only): the day whose tray photo the serving was checked against.
 - Never add a name the table already matches `exact`: the dataset is looked up first, so it would
   replace the table's row everywhere.
 - The same name again replaces the earlier entry — correct a food by sending it again.
@@ -135,27 +134,24 @@ node scripts/gplan-claude.mjs learn /tmp/gplan-foods.json
 
 ```bash
 node scripts/gplan-claude.mjs lunch /tmp/gplan-lunch
-node scripts/gplan-claude.mjs lunch /tmp/gplan-lunch 2026-10-01 2026-10-31   # a given range
+node scripts/gplan-claude.mjs lunch /tmp/gplan-lunch 2026-10-12 5   # from a given day, 5 days
 ```
 
-The school posts its tray photos irregularly — often several weeks' worth at once, long after the
-meals. So every run looks from the 1st of last month to a week ahead, and lists only the days with
-work left (`days`; `daysWithWork: 0` means nothing to do). Each day has `menu` (all its dishes, to
-tell the tray's compartments apart), `trayPhoto` (the school's photo, saved locally, or `null`
-while not posted) and `work`:
+Every run checks the menus from today to a week ahead, so each day's lunch is counted before it
+is eaten. For each school day: `menu` (its dishes as the lunch sheet reads them) and `unknown`
+(the dishes the table does not match exactly and the dataset does not have; `tableGuess` is the
+table's guess). `unknownDishes: 0` means nothing to do.
 
-- `todo: "work-out"` — a dish the table does not know (`tableGuess` is its guess). Work out one
-  school serving. With a tray photo, judge the serving from it and send `"tray": "<that date>"`;
-  without one (a coming day, or a photo not posted yet), work it out from the menu and send no
-  `tray` — it comes back as `check-photo` once the photo appears.
-- `todo: "check-photo"` — a dish already in the dataset that was worked out without a photo, and
-  the school has since posted one. Look at the photo, correct the serving if it is off, and send
-  it again with `"tray": "<that date>"` (even when nothing changed — that is what marks it done).
+For each unknown dish, work out **one school serving** and send it with step 3's `learn`, with the
+right `cat`: the lunch planner raises protein dishes, keeps rice and trims dessert and starchy
+sides, so a 반찬 filed as `main` would be portioned wrongly. Dishes from the self-serve counter
+(`extraCounter: true`) are optional extras; work them out the same way. Every unknown dish must be
+sent, or the next run lists it again.
 
-Send everything with step 3's `learn`, with the right `cat`: the lunch planner raises protein
-dishes, keeps rice and trims dessert and starchy sides, so a 반찬 filed as `main` would be
-portioned wrongly. Dishes from the self-serve counter (`extraCounter: true`) are optional extras;
-work them out the same way. Every listed dish must be sent, or the next run lists it again.
+`referenceTrays` are the school's latest tray photos (saved locally, with their menus to tell the
+compartments apart). The school posts them irregularly — often several weeks at once — so they
+are **not** the day's own lunch: use them only to see how much a tray usually holds (the rice,
+a side-dish scoop, the main dish, the soup bowl) and size the serving to that.
 
 ### 5. Finish
 
