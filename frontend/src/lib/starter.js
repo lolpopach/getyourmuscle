@@ -44,12 +44,13 @@ const FIVE_BY_FIVE = [
 //   - the plan's cues as notes (the left arm is ~5 % smaller, so it sets the reps)
 //   - the incline treadmill walk after weights on the four weekdays, toward the day's steps
 //   - the gym's machines where they do the job as well: a chest press for the flat press, the
-//     pec deck for a chest fly on the back day, a reverse pec deck for the rear delts
-//     (Advanced Fitness, 2026-10-27)
-// The leg days are Tuesday and Friday, biceps Thursday and Saturday, triceps Monday and
-// Saturday, chest Monday, Thursday and Saturday, so nothing is trained two days running. Weekly
-// sets: chest 16 (upper 7, dips 3), biceps 12, triceps 12 counting dips, quads 14, hamstrings 9,
-// side delts 13, rear delts 6, back 10.
+//     pec deck for a second fly, a reverse pec deck for the rear delts (Advanced Fitness,
+//     2026-10-27)
+// Monday is the chest day (the user's call: the presses and both flies together), with
+// Saturday's dips as the chest's second day. The leg days are Tuesday and Friday, biceps
+// Thursday and Saturday, triceps and chest Monday and Saturday, so nothing is trained two days
+// running. Weekly sets: chest 16 (Monday 13, upper 7), biceps 12, triceps 12 counting dips,
+// quads 14, hamstrings 9, side delts 12, rear delts 6, back 10.
 const LEFT_SETS = '왼팔이 멈추면 그 세트는 끝'
 const SMALL_LAST = '반동 없이 · 마지막 세트는 실패 직전까지'
 // [id, sets, [bottom, top], rest seconds, extra fields]
@@ -62,8 +63,9 @@ const GPLAN_SOLID = [
     lift('0314', 4, [8, 10], 150, { ...first, note: LEFT_SETS }),   // dumbbell incline press
     lift('0577', 3, [8, 10], 120, { note: '손잡이가 가슴 가운데 높이에 오게 의자 조절' }),  // machine chest press
     lift('0405', 3, [8, 10], 120, { note: LEFT_SETS }),             // seated dumbbell shoulder press
-    lift('0334', 4, [12, 15], 75, { note: SMALL_LAST }),            // dumbbell lateral raise
     lift('0179', 3, [12, 15], 75, { note: '아래에서 위로 — 윗가슴' }),  // low-to-high cable fly
+    lift('0596', 3, [12, 15], 75, { note: '가슴 펴고, 손잡이를 모은 끝에서 1초 쥐어짜기' }),  // pec deck (chest fly machine)
+    lift('0334', 3, [12, 15], 75, { note: SMALL_LAST }),            // dumbbell lateral raise
     lift('0194', 3, [10, 12], 75),                                  // overhead rope triceps extension
     inclineWalk
   ]],
@@ -81,7 +83,6 @@ const GPLAN_SOLID = [
     lift('2330', 4, [8, 10], 120, first),                           // lat pulldown
     lift('0027', 3, [8, 10], 150),                                  // barbell row
     lift('0861', 3, [10, 12], 90),                                  // seated cable row
-    lift('0596', 3, [12, 15], 75, { note: '가슴 펴고, 손잡이를 모은 끝에서 1초 쥐어짜기' }),  // pec deck (chest fly machine)
     lift('0203', 3, [12, 15], 60),                                  // face pull (rope rear-delt row)
     lift('0178', 3, [12, 15], 60, { note: SMALL_LAST }),            // cable lateral raise
     lift('0447', 3, [8, 10], 75),                                   // EZ-bar curl
