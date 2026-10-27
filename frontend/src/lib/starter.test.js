@@ -11,11 +11,11 @@ import { isWarmupRow } from './workout-model.js'
 const APPROVED = {
   // [id, sets, reps] here; the rest of G-PLAN's prescription is pinned in its own block below.
   'gplan-solid': [
-    [1, '상체 A · 가슴 어깨', [['0314', 4, 10], ['0025', 3, 8], ['0405', 3, 10], ['0334', 4, 15], ['0179', 3, 15], ['0194', 3, 12], ['3666', 1, undefined]]],
+    [1, '상체 A · 가슴 어깨', [['0314', 4, 10], ['0577', 3, 10], ['0405', 3, 10], ['0334', 4, 15], ['0179', 3, 15], ['0194', 3, 12], ['3666', 1, undefined]]],
     [2, '하체 A · 스쿼트', [['0043', 4, 8], ['0085', 3, 10], ['0739', 2, 12], ['0586', 3, 12], ['0594', 3, 15], ['0472', 3, 12], ['3666', 1, undefined]]],
     [4, '상체 B · 등', [['2330', 4, 10], ['0027', 3, 10], ['0861', 3, 12], ['0203', 3, 15], ['0178', 3, 15], ['0447', 3, 10], ['3666', 1, undefined]]],
     [5, '하체 B · 레그프레스', [['0410', 3, 10], ['0739', 3, 12], ['0599', 3, 12], ['0585', 2, 15], ['0334', 3, 15], ['0605', 3, 15], ['0175', 3, 15], ['3666', 1, undefined]]],
-    [6, '팔 · 어깨', [['0030', 3, 10], ['0031', 3, 10], ['0060', 3, 12], ['0318', 3, 12], ['0334', 4, 15], ['0200', 3, 12], ['0313', 3, 12]]],
+    [6, '팔 · 어깨', [['0251', 3, 12], ['0031', 3, 10], ['0060', 3, 12], ['0318', 3, 12], ['0334', 3, 15], ['0602', 3, 15], ['0200', 3, 12], ['0313', 3, 12]]],
   ],
   ppl: [
     [1, 'Push Day', [['0025', 4, 8], ['0047', 3, 10], ['0426', 3, 10], ['0334', 3, 12], ['0241', 3, 12], ['0251', 3, 10]]],
@@ -108,15 +108,16 @@ const LEFT = '왼팔이 멈추면 그 세트는 끝'
 const SMALL = '반동 없이 · 마지막 세트는 실패 직전까지'
 const FLY = '아래에서 위로 — 윗가슴'
 const GPLAN_FULL = [
-  [['0314', 8, 10, 150, 2, LEFT], ['0025', 6, 8, 150], ['0405', 8, 10, 120, 0, LEFT], ['0334', 12, 15, 75, 0, SMALL],
+  [['0314', 8, 10, 150, 2, LEFT], ['0577', 8, 10, 120, 0, '손잡이가 가슴 가운데 높이에 오게 의자 조절'], ['0405', 8, 10, 120, 0, LEFT], ['0334', 12, 15, 75, 0, SMALL],
     ['0179', 12, 15, 75, 0, FLY], ['0194', 10, 12, 75]],
   [['0043', 6, 8, 180, 2], ['0085', 8, 10, 150], ['0739', 10, 12, 120], ['0586', 10, 12, 75], ['0594', 12, 15, 60], ['0472', 10, 12, 60]],
   [['2330', 8, 10, 120, 2], ['0027', 8, 10, 150], ['0861', 10, 12, 90], ['0203', 12, 15, 60], ['0178', 12, 15, 60, 0, SMALL],
     ['0447', 8, 10, 75]],
   [['0410', 8, 10, 120, 2, '다리마다 · 왼다리부터, 오른다리는 같은 횟수까지'], ['0739', 10, 12, 120], ['0599', 10, 12, 75], ['0585', 12, 15, 60],
     ['0334', 12, 15, 60, 0, SMALL], ['0605', 12, 15, 60], ['0175', 12, 15, 60]],
-  [['0030', 8, 10, 120, 2], ['0031', 8, 10, 90], ['0060', 10, 12, 75], ['0318', 10, 12, 75, 0, LEFT], ['0334', 12, 15, 60, 0, SMALL],
-    ['0200', 10, 12, 60], ['0313', 10, 12, 60, 0, LEFT]],
+  [['0251', 8, 12, 120, 0, '몸을 앞으로 기울여 아랫가슴 · 어깨가 팔꿈치 아래로 내려가지 않게 · 첫 세트 전 어시스트 딥스로 가볍게 1세트'],
+    ['0031', 8, 10, 90], ['0060', 10, 12, 75], ['0318', 10, 12, 75, 0, LEFT], ['0334', 12, 15, 60, 0, SMALL],
+    ['0602', 12, 15, 60, 0, '팔은 살짝 굽힌 채, 날개뼈 말고 어깨 뒤로 벌리기'], ['0200', 10, 12, 60], ['0313', 10, 12, 60, 0, LEFT]],
 ]
 
 describe('G-PLAN Solid Build, as prescribed', () => {
@@ -147,7 +148,7 @@ describe('G-PLAN Solid Build, as prescribed', () => {
   // More arms (the user's ask, 2026-10-27) and the legs growing too (the next one, same day):
   // two leg days, 12 sets each for biceps and triceps, and no muscle group trained two days
   // running, so each one comes to its next session recovered.
-  it('has two leg days, 12 sets each for biceps and triceps, and never trains a group two days running', () => {
+  it('has two leg days, 12 sets each for biceps and triceps, chest twice, and never a group two days running', () => {
     const { routines, schedule } = buildStarterPlan('gplan-solid')
     const dayOf = Object.fromEntries(schedule.map(({ day, routineId }) => [routineId, day]))
     const legDays = routines.filter(r => r.ex.some(e => EXIDX[e.id].bp === 'upper legs'))
@@ -155,10 +156,13 @@ describe('G-PLAN Solid Build, as prescribed', () => {
     const daysWith = has => routines.filter(r => r.ex.some(has)).map(r => dayOf[r.id]).sort((a, b) => a - b)
     const apart = (days, what) => days.slice(1).forEach((d, i) => expect(d - days[i], what + ' on back-to-back days').toBeGreaterThan(1))
     apart(daysWith(e => EXIDX[e.id].bp === 'upper legs'), 'legs')
-    for (const muscle of ['biceps', 'triceps']) {
-      const sets = routines.flatMap(r => r.ex).filter(e => EXIDX[e.id].tg === muscle).reduce((n, e) => n + e.sets, 0)
-      expect(sets, muscle).toBe(12)
-      apart(daysWith(e => EXIDX[e.id].tg === muscle), muscle)
+    // Dips are filed under the chest but load the triceps as hard, so they count for both.
+    const DIP = '0251'
+    const works = muscle => e => EXIDX[e.id].tg === muscle || (muscle === 'triceps' && e.id === DIP)
+    for (const muscle of ['biceps', 'triceps', 'pectorals']) {
+      const sets = routines.flatMap(r => r.ex).filter(works(muscle)).reduce((n, e) => n + e.sets, 0)
+      expect(sets, muscle).toBe(muscle === 'pectorals' ? 13 : 12)
+      apart(daysWith(works(muscle)), muscle)
     }
   })
 

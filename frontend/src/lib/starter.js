@@ -39,12 +39,16 @@ const FIVE_BY_FIVE = [
 //   - a rep range per exercise under double progression (the routine's `prog`): reps climb to
 //     the top of the range at one weight, then the weight goes up and reps go back to the bottom
 //   - the rest the plan asks for: 2–3 min on the big lifts, 60–90 s on the small ones
-//   - two warm-up sets on each day's first lift
+//   - two warm-up sets on each day's first lift (Saturday's dips are bodyweight: its note says
+//     how to warm up instead)
 //   - the plan's cues as notes (the left arm is ~5 % smaller, so it sets the reps)
 //   - the incline treadmill walk after weights on the four weekdays, toward the day's steps
-// The leg days are Tuesday and Friday, biceps Thursday and Saturday, triceps Monday and
-// Saturday, so nothing is trained two days running. Weekly direct sets: biceps 12, triceps 12,
-// quads 14, hamstrings 9, side delts 14, back 10 plus rear delts, upper chest 7 plus the presses.
+//   - the gym's machines where they do the job as well: a chest press for the flat press, a
+//     reverse pec deck for the rear delts (Advanced Fitness, 2026-10-27)
+// The leg days are Tuesday and Friday, biceps Thursday and Saturday, triceps and chest Monday
+// and Saturday, so nothing is trained two days running. Weekly sets: chest 13 (upper 7, dips 3),
+// biceps 12, triceps 12 counting dips, quads 14, hamstrings 9, side delts 13, rear delts 6,
+// back 10.
 const LEFT_SETS = '왼팔이 멈추면 그 세트는 끝'
 const SMALL_LAST = '반동 없이 · 마지막 세트는 실패 직전까지'
 // [id, sets, [bottom, top], rest seconds, extra fields]
@@ -55,7 +59,7 @@ const inclineWalk = { id: '3666', sets: 1, min: 20, speed: 5, note: '경사 10~1
 const GPLAN_SOLID = [
   ['g-upper-a', '상체 A · 가슴 어깨', 'barbell', [
     lift('0314', 4, [8, 10], 150, { ...first, note: LEFT_SETS }),   // dumbbell incline press
-    lift('0025', 3, [6, 8], 150),                                  // barbell bench press
+    lift('0577', 3, [8, 10], 120, { note: '손잡이가 가슴 가운데 높이에 오게 의자 조절' }),  // machine chest press
     lift('0405', 3, [8, 10], 120, { note: LEFT_SETS }),             // seated dumbbell shoulder press
     lift('0334', 4, [12, 15], 75, { note: SMALL_LAST }),            // dumbbell lateral raise
     lift('0179', 3, [12, 15], 75, { note: '아래에서 위로 — 윗가슴' }),  // low-to-high cable fly
@@ -93,14 +97,16 @@ const GPLAN_SOLID = [
     lift('0175', 3, [12, 15], 60),                                  // cable crunch
     inclineWalk
   ]],
-  // Biceps and triceps take turns, so each rests while the other works. Saturday is also an
-  // interval-running day (§2.4.1), so it carries no incline walk.
+  // Dips open it: the lower chest and the triceps in one lift, and the chest's second day of the
+  // week. Then biceps and triceps take turns, so each rests while the other works. Saturday is
+  // also an interval-running day (§2.4.1), so it carries no incline walk.
   ['g-arms', '팔 · 어깨', 'arm', [
-    lift('0030', 3, [8, 10], 120, first),                           // close-grip bench press
+    lift('0251', 3, [8, 12], 120, { note: '몸을 앞으로 기울여 아랫가슴 · 어깨가 팔꿈치 아래로 내려가지 않게 · 첫 세트 전 어시스트 딥스로 가볍게 1세트' }),  // chest dip
     lift('0031', 3, [8, 10], 90),                                   // barbell curl
     lift('0060', 3, [10, 12], 75),                                  // skull crusher
     lift('0318', 3, [10, 12], 75, { note: LEFT_SETS }),             // incline dumbbell curl
-    lift('0334', 4, [12, 15], 60, { note: SMALL_LAST }),            // dumbbell lateral raise
+    lift('0334', 3, [12, 15], 60, { note: SMALL_LAST }),            // dumbbell lateral raise
+    lift('0602', 3, [12, 15], 60, { note: '팔은 살짝 굽힌 채, 날개뼈 말고 어깨 뒤로 벌리기' }),  // reverse pec deck
     lift('0200', 3, [10, 12], 60),                                  // rope pushdown
     lift('0313', 3, [10, 12], 60, { note: LEFT_SETS })              // dumbbell hammer curl
   ]]
