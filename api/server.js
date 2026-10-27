@@ -32,7 +32,7 @@ import {
 import { createDeviceLink, findDeviceLink, burnDeviceLink, dropDeviceLinks } from './device-link.js';
 import { createMediaStore, mediaLimits, mediaConfig, MediaError, HASH_RE } from './media.js';
 import { issueHealthToken, revokeHealthToken, findHealthUser, parseIngest, mergeIngest, daysFrom } from './health.js';
-import { fetchMonth, lunchFor, isDay } from './school-lunch.js';
+import { fetchMonth, lunchFor, isDay, parsePostedMenu } from './school-lunch.js';
 import { newClaudeToken, hashClaudeToken, looksLikeClaudeToken, bearerOf, parseInboxEntry, appEntry, claudeEntry, parseResult, mergeFoods, MAX_PENDING } from './claude-inbox.js';
 
 const PORT = +(process.env.PORT || 3000);
@@ -140,6 +140,8 @@ const healthFile = uid => path.join(DATA, 'health-' + uid.replace(/[^a-zA-Z0-9_-
 // document per profile next to the state document, written by the same atomic pattern.
 const inboxFile = uid => path.join(DATA, 'inbox-' + uid.replace(/[^a-zA-Z0-9_-]/g, '') + '.json');
 const foodsFile = uid => path.join(DATA, 'foods-' + uid.replace(/[^a-zA-Z0-9_-]/g, '') + '.json');
+// The school's monthly menus as the scheduled Claude session read them off the PDF: { months }.
+const menuFile = uid => path.join(DATA, 'menu-' + uid.replace(/[^a-zA-Z0-9_-]/g, '') + '.json');
 const readDoc = (file, empty) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return empty; } };
 const readInbox = uid => { const d = readDoc(inboxFile(uid), null); return Array.isArray(d?.entries) ? d.entries : []; };
 const writeInbox = (uid, entries) => atomicWrite(inboxFile(uid), JSON.stringify({ entries }), 0o600);
@@ -880,7 +882,8 @@ const THROTTLED = {
   'POST /api/health/ingest': 'health',
   // So does a wrong Claude token (G-PLAN's inbox).
   'GET /api/claude/inbox': 'claude', 'POST /api/claude/result': 'claude',
-  'GET /api/claude/foods': 'claude', 'POST /api/claude/foods': 'claude'
+  'GET /api/claude/foods': 'claude', 'POST /api/claude/foods': 'claude',
+  'GET /api/claude/lunch': 'claude', 'POST /api/claude/lunch': 'claude'
 };
 
 // Which address the throttle counts against. Unlike clientIp() above, which only labels a log
@@ -2178,7 +2181,8 @@ const routes = {
     if (!LUNCH_BASE) return json(res, 404, { error: 'no school menu is set up' });
     const date = new URL(req.url, 'http://x').searchParams.get('date') || '';
     if (!isDay(date)) return json(res, 400, { error: 'date must be YYYY-MM-DD' });
-    const r = await lunchFor(date, LUNCH_MONTHS.get(date.slice(0, 7)), month => fetchMonth(LUNCH_BASE, month));
+    const posted = readDoc(menuFile(user.id), { months: {} }).months?.[date.slice(0, 7)] || null;
+    const r = await lunchFor(date, LUNCH_MONTHS.get(date.slice(0, 7)), month => fetchMonth(LUNCH_BASE, month), Date.now(), posted);
     if (r.error) return json(res, 502, { error: r.error });
     if (r.store) {
       LUNCH_MONTHS.set(r.store.month, r.store);
@@ -2273,6 +2277,25 @@ const routes = {
     if (m.error) return json(res, 400, { error: m.error });
     atomicWrite(foodsFile(user.id), JSON.stringify(m.doc), 0o600);
     json(res, 200, { ok: true, added: m.added, count: m.doc.foods.length });
+  },
+  // The month's menu, read off the school's PDF by the scheduled session: the lunch card's answer
+  // for the days the school's calendar page does not have yet.
+  'GET /api/claude/lunch': async (req, res) => {
+    const user = claudeUser(req);
+    if (!user) return json(res, 401, { error: 'invalid token' });
+    json(res, 200, { months: readDoc(menuFile(user.id), { months: {} }).months || {} });
+  },
+  'POST /api/claude/lunch': async (req, res) => {
+    const user = claudeUser(req);
+    if (!user) return json(res, 401, { error: 'invalid token' });
+    if (!LUNCH_BASE) return json(res, 404, { error: 'no school menu is set up' });
+    const r = parsePostedMenu(await readBody(req));
+    if (r.error) return json(res, 400, { error: r.error });
+    const months = { ...(readDoc(menuFile(user.id), { months: {} }).months || {}), [r.doc.month]: r.doc };
+    // Six months are plenty; older ones go.
+    const kept = Object.fromEntries(Object.entries(months).sort(([a], [b]) => (a < b ? -1 : 1)).slice(-6));
+    atomicWrite(menuFile(user.id), JSON.stringify({ months: kept }), 0o600);
+    json(res, 200, { ok: true, month: r.doc.month, days: Object.keys(r.doc.days).length });
   },
   'GET /api/push/public-key': async (req, res) => json(res, 200, { key: vapid.publicKey }),
 
@@ -2459,6 +2482,7 @@ const routes = {
     try { fs.unlinkSync(healthFile(u.id)); } catch { /* never synced */ }
     try { fs.unlinkSync(inboxFile(u.id)); } catch { /* nothing sent to Claude */ }
     try { fs.unlinkSync(foodsFile(u.id)); } catch { /* no foods worked out */ }
+    try { fs.unlinkSync(menuFile(u.id)); } catch { /* no menu read for them */ }
     try { coachConfig.clearProfileAuth(u.id); } catch { /* nothing stored */ }
     // Their photos and videos — the one place a profile's folder under uploads/ is removed.
     try { MEDIA.removeUser(u.id); } catch (e) { console.error('media: could not remove uploads of', u.id, e.message); }

@@ -17,7 +17,7 @@ import crypto from 'node:crypto'
 import { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server'
 import { verifyError } from '../api/verify-error.js'
 import { issueHealthToken, hashHealthToken, parseIngest, mergeIngest, daysFrom } from '../api/health.js'
-import { lunchUrl, fetchMonth, lunchFor, isDay } from '../api/school-lunch.js'
+import { lunchUrl, fetchMonth, lunchFor, isDay, parsePostedMenu } from '../api/school-lunch.js'
 import { newClaudeToken, hashClaudeToken, looksLikeClaudeToken, bearerOf, parseInboxEntry, appEntry, claudeEntry, parseResult, mergeFoods, MAX_PENDING } from '../api/claude-inbox.js'
 
 export const SCHEMA = [
@@ -382,7 +382,7 @@ export function createApi(db, env = {}, { fetch: fetchImpl = (...a) => globalThi
         const k = 'lunch:' + date.slice(0, 7)
         let cached = null
         try { cached = JSON.parse(kvGet(k) || 'null') } catch { /* a broken copy is no copy */ }
-        const r = await lunchFor(date, cached, month => fetchMonth(base, month, { fetch: fetchImpl, now }), now)
+        const r = await lunchFor(date, cached, month => fetchMonth(base, month, { fetch: fetchImpl, now }), now, postedMenu(session().id, date.slice(0, 7)))
         if (r.error) return json(502, { error: r.error })
         if (r.store) kvSet(k, JSON.stringify(r.store))
         return json(200, r.body)
@@ -480,6 +480,38 @@ export function createApi(db, env = {}, { fetch: fetchImpl = (...a) => globalThi
         db.exec('INSERT INTO foods (uid, doc) VALUES (?, ?) ON CONFLICT(uid) DO UPDATE SET doc = excluded.doc', u.id, JSON.stringify(m.doc))
         return json(200, { ok: true, added: m.added, count: m.doc.foods.length })
       },
+      // The month's menu, read off the school's PDF by the scheduled session: the lunch card's
+      // answer for the days the school's calendar page does not have yet.
+      'GET /api/claude/lunch': () => {
+        const u = claudeUser()
+        if (!u) return json(401, { error: 'invalid token' })
+        const months = {}
+        for (const row of menuRows(u.id, 'v')) {
+          try { const d = JSON.parse(row.v); months[d.month] = d } catch { /* a broken copy is no copy */ }
+        }
+        return json(200, { months })
+      },
+      'POST /api/claude/lunch': async () => {
+        const u = claudeUser()
+        if (!u) return json(401, { error: 'invalid token' })
+        if (!lunchUrl(env)) return json(404, { error: 'no school menu is set up' })
+        const r = parsePostedMenu(await readBody(request), now)
+        if (r.error) return json(400, { error: r.error })
+        kvSet('menu:' + u.id + ':' + r.doc.month, JSON.stringify(r.doc))
+        // Six months are plenty; older ones go.
+        const old = menuRows(u.id, 'k').map(x => x.k).slice(0, -6)
+        for (const k of old) db.exec('DELETE FROM kv WHERE k = ?', k)
+        return json(200, { ok: true, month: r.doc.month, days: Object.keys(r.doc.days).length })
+      },
+    }
+
+    function postedMenu(uid, month) {
+      try { return JSON.parse(kvGet('menu:' + uid + ':' + month) || 'null') } catch { return null }
+    }
+    // A profile's menus by key range, oldest month first ('menu:<uid>:' up to the next character,
+    // ';'): LIKE would read the `_` in an id as a wildcard and match other profiles.
+    function menuRows(uid, col) {
+      return db.exec(`SELECT ${col === 'v' ? 'v' : 'k'} FROM kv WHERE k >= ? AND k < ? ORDER BY k`, 'menu:' + uid + ':', 'menu:' + uid + ';')
     }
 
     // The profile a Claude token belongs to, or null; each use is dated for the settings card.

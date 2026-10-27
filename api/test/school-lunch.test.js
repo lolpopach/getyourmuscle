@@ -11,7 +11,7 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { boundPort } from './helpers.mjs';
-import { parseMenuPage, decodePage, splitDishes, monthUrl, lunchFor, LUNCH_CACHE_MS } from '../school-lunch.js';
+import { parseMenuPage, decodePage, splitDishes, monthUrl, lunchFor, parsePostedMenu, LUNCH_CACHE_MS } from '../school-lunch.js';
 import { parseInboxEntry, parseResult, mergeFoods, normName } from '../claude-inbox.js';
 
 const API = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -48,6 +48,26 @@ test('the month cache: fresh is used, stale is refreshed, and kept when the scho
   const kept = await lunchFor('2026-10-02', month, down, 1000 + LUNCH_CACHE_MS + 1);
   assert.deepEqual(kept, { body: { date: '2026-10-02', meals: [], photo: null, fetchedAt: 1000 }, store: null });
   assert.deepEqual(await lunchFor('2026-11-02', month, down, 0), { error: 'down' });
+});
+
+test('the month read off the PDF: validated, and the answer for the days the calendar page lacks', async () => {
+  assert.deepEqual(parsePostedMenu({ month: '2026-10', days: { '2026-10-26': ['  흰쌀밥 ', '', 7, '돈육콩비지찌개'] } }, 9), { doc: { month: '2026-10', days: { '2026-10-26': [{ label: '중식', dishes: ['흰쌀밥', '돈육콩비지찌개'] }] }, at: 9 } });
+  assert.equal(parsePostedMenu({ month: '2026-10', pdf: '0f3a9c2e5b7d1f48', days: { '2026-10-26': ['흰쌀밥'] } }).doc.pdf, '0f3a9c2e5b7d1f48');
+  assert.equal('pdf' in parsePostedMenu({ month: '2026-10', pdf: '<script>', days: { '2026-10-26': ['흰쌀밥'] } }).doc, false);
+  assert.match(parsePostedMenu({ month: '2026-13', days: {} }).error, /YYYY-MM/);
+  assert.match(parsePostedMenu({ month: '2026-10', days: [] }).error, /days/);
+  assert.match(parsePostedMenu({ month: '2026-10', days: { '2026-11-02': ['x'] } }).error, /not a day of 2026-10/);
+  assert.match(parsePostedMenu({ month: '2026-10', days: { '2026-10-26': [] } }).error, /no dishes/);
+
+  const board = { month: '2026-10', days: { '2026-10-01': [{ label: '중식', dishes: ['흰쌀밥'] }] }, at: 1000 };
+  const pdf = parsePostedMenu({ month: '2026-10', days: { '2026-10-01': ['PDF'], '2026-10-26': ['돈육콩비지찌개'] } }, 500).doc;
+  const down = async () => ({ error: 'down' });
+  // The calendar page wins for a day it has; the PDF answers for one it lacks.
+  assert.deepEqual((await lunchFor('2026-10-01', board, down, 2000, pdf)).body.meals, board.days['2026-10-01']);
+  assert.deepEqual((await lunchFor('2026-10-26', board, down, 2000, pdf)).body, { date: '2026-10-26', meals: [{ label: '중식', dishes: ['돈육콩비지찌개'] }], photo: null, fetchedAt: 500 });
+  // The school's site down and nothing cached: the PDF still answers. Another month's PDF does not.
+  assert.equal((await lunchFor('2026-10-26', null, down, 2000, pdf)).body.meals[0].dishes[0], '돈육콩비지찌개');
+  assert.deepEqual(await lunchFor('2026-11-02', null, down, 2000, pdf), { error: 'down' });
 });
 
 test('an inbox entry, a result and the dataset, bounded', () => {
@@ -116,6 +136,29 @@ test('GET /api/lunch reads the school page once a month and answers per day', as
   assert.deepEqual(day.meals[0].dishes, ['흰쌀밥', '콩나물국(0.5)', '안동찜닭', '시금치나물', '배추김치', '용과']);
   assert.deepEqual((await (await fetch(`${base}/api/lunch?date=2026-10-04`, { headers: app })).json()).meals, []);
   assert.deepEqual(asked, ['/?menu_no=34&ChangeDate=2026-10-1']);
+});
+
+test('POST /api/claude/lunch: the month off the PDF answers GET /api/lunch for a day the page lacks', async t => {
+  const school = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end(PAGE); });
+  await new Promise(r => school.listen(0, '127.0.0.1', r));
+  t.after(() => school.close());
+  const { base, dataDir } = await server(t, { LUNCH_URL: `http://127.0.0.1:${school.address().port}/?menu_no=34` });
+  const app = { cookie: cookie(), origin: 'http://localhost:8080', 'content-type': 'application/json' };
+  const { token } = await (await fetch(`${base}/api/account/claude-token`, { method: 'POST', headers: app, body: '{}' })).json();
+  const claude = { authorization: 'Bearer ' + token, 'content-type': 'application/json' };
+  const send = (body, headers = claude) => fetch(`${base}/api/claude/lunch`, { method: 'POST', headers, body: JSON.stringify(body) });
+  const menu = { month: '2026-10', days: { '2026-10-26': ['흰쌀밥', '돈육콩비지찌개', '치즈함박카츠*브라운S'] } };
+
+  assert.equal((await send(menu, app)).status, 401);
+  assert.equal((await send({ month: '2026-10', days: { '2026-10-26': [] } })).status, 400);
+  assert.deepEqual(await (await send(menu)).json(), { ok: true, month: '2026-10', days: 1 });
+  assert.deepEqual(Object.keys((await (await fetch(`${base}/api/claude/lunch`, { headers: claude })).json()).months), ['2026-10']);
+  assert.ok(fs.existsSync(path.join(dataDir, `menu-${UID}.json`)));
+
+  const day = await (await fetch(`${base}/api/lunch?date=2026-10-26`, { headers: app })).json();
+  assert.deepEqual(day.meals, [{ label: '중식', dishes: ['흰쌀밥', '돈육콩비지찌개', '치즈함박카츠*브라운S'] }]);
+  // A day the calendar page has is still the page's.
+  assert.equal((await (await fetch(`${base}/api/lunch?date=2026-10-07`, { headers: app })).json()).meals[0].dishes[1], '콩나물국(0.5)');
 });
 
 test('the inbox for Claude: queued by the app, answered with the token, applied and acknowledged', async t => {

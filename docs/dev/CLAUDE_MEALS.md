@@ -6,8 +6,9 @@ also goes into an **inbox**. A Claude Code session, scheduled on the owner's own
 (no API key, no paid API), reads that inbox a few times a day, works the nutrition out, writes the
 answer back and adds each new food to a **dataset**. The app replaces the table's numbers with the
 answer, and looks the dataset up before its own table, so a food worked out once is counted
-instantly afterwards. The same session checks the school lunch menu every day, and adds the
-dishes the table does not know, sized by the tray photos the school posts.
+instantly afterwards. The same session reads the school's monthly menu PDF (the school's calendar
+page is filled in weeks late, the PDF has the whole month ahead), checks the coming week's lunch
+every day, and adds the dishes the table does not know, sized by the tray photos the school posts.
 
 ```
 G-PLAN app ── POST /api/inbox ──▶ server inbox ◀── GET /api/claude/inbox ── scheduled Claude
@@ -16,8 +17,8 @@ G-PLAN app ── POST /api/inbox ──▶ server inbox ◀── GET /api/clau
    └── GET /api/inbox, /api/foods ◀── answers + dataset ◀─────────────────────────┘
 ```
 
-Code: `api/claude-inbox.js` (validation, token, dataset merge), the routes in `api/server.js` and
-`cloudflare/api.js`, `frontend/src/lib/inbox.js` and `components/GplanFood.jsx` (the app side),
+Code: `api/claude-inbox.js` (validation, token, dataset merge), `api/school-menu-pdf.js` (the
+monthly PDF read back into days), the routes in `api/server.js` and `cloudflare/api.js`, `frontend/src/lib/inbox.js` and `components/GplanFood.jsx` (the app side),
 `components/ClaudeLink.jsx` (Settings), `scripts/gplan-claude.mjs` (the session's side).
 
 ## Setting it up
@@ -30,7 +31,8 @@ Code: `api/claude-inbox.js` (validation, token, dataset merge), the routes in `a
    `GPLAN_CLAUDE_TOKEN` with the token as its value. Never paste the token into a chat.
 4. The scheduled task (a fresh session a few times a day) runs the procedure below. Optional
    variables: `GPLAN_URL` (default `https://getyourmuscle.yangchanhee11.workers.dev`),
-   `GPLAN_TZ` (default `Asia/Ho_Chi_Minh`), `LUNCH_URL` (default the school's 식단표 page).
+   `GPLAN_TZ` (default `Asia/Ho_Chi_Minh`), `LUNCH_URL` (default the school's 식단표 page),
+   `LUNCH_PDF_BOARD` (default the school's 급식소식 board, where the monthly PDFs are).
 
 The token reads the inbox and the dataset and writes answers and foods — nothing else: no
 workouts, no body data, no account. Revoking it in Settings stops the job at its next run.
@@ -49,7 +51,7 @@ node scripts/gplan-claude.mjs check
 
 - exit 2: the token is missing or was revoked → stop and report that in one line.
 - exit 3: the server cannot be reached, or runs a build without the inbox → stop and report.
-- `waiting: 0` → skip to step 4 (the lunch).
+- `waiting: 0` → skip to step 4 (the month's menu).
 
 ### 2. Work out the waiting meals
 
@@ -130,7 +132,34 @@ node scripts/gplan-claude.mjs learn /tmp/gplan-foods.json
   replace the table's row everywhere.
 - The same name again replaces the earlier entry — correct a food by sending it again.
 
-### 4. The school lunch
+### 4. The month's menu, from the school's PDF
+
+```bash
+node scripts/gplan-claude.mjs menu /tmp/gplan-menu
+```
+
+The school posts each month's menu ahead of time on its 급식소식 board (`?menu_no=102`) as a
+one-page PDF calendar — "2026학년도 10월 학교급식 식단표", with the dinner (석식) as a second PDF,
+which is not used. Its calendar page (`?menu_no=34`, what the lunch card reads) is filled in weeks
+late. This command finds this month's and next month's post, saves the lunch PDF, reads it with
+`pdftotext -bbox` into `{ month, days: { 'YYYY-MM-DD': [dishes] } }` (allergy codes, notices and
+holidays left out) and writes that to `menu-YYYY-MM.json`. Per month:
+
+- `upToDate: true` → this very PDF was already sent (the JSON carries its fingerprint, `pdf`);
+  nothing to do. A school that replaces the PDF mid-month makes it `false` again.
+- `note: "The school has not posted this month yet."` → nothing to do.
+- otherwise → open the PDF with the Read tool and compare it with the JSON day by day: every
+  school day there, each dish as on the PDF (an obvious typo, such as 얼무된장국 for 열무된장국,
+  may be corrected), no notice or holiday read as a dish. Fix the JSON if needed (an `error`
+  means nothing could be read: write the days by hand from the PDF), then send it:
+
+```bash
+node scripts/gplan-claude.mjs send-menu /tmp/gplan-menu/menu-2026-11.json
+```
+
+The app then answers from the calendar page for a day it has, and from this menu for the others.
+
+### 5. The school lunch
 
 ```bash
 node scripts/gplan-claude.mjs lunch /tmp/gplan-lunch
@@ -153,15 +182,14 @@ compartments apart). The school posts them irregularly — often several weeks a
 are **not** the day's own lunch: use them only to see how much a tray usually holds (the rice,
 a side-dish scoop, the main dish, the soup bowl) and size the serving to that.
 
-### 5. Finish
+### 6. Finish
 
-One short summary: meals answered, foods added, lunch days checked, anything that needs the
-owner. The job changes nothing in the repository: no commits, no pull requests. Photos leave
+One short summary: meals answered, menus sent, foods added, lunch days checked, anything that
+needs the owner. The job changes nothing in the repository: no commits, no pull requests. Photos leave
 the server once answered; the local copies go with the session.
 
 ## Limits
 
 30 entries waiting per profile (a meal past that keeps the table's numbers), 20 handed out per
-read; photos up
-to 1 MB (the app sends a ~1024 px JPEG); 300 foods per `learn`, 2,000 in the dataset (the
-oldest drop first); 60 inbox writes an hour from the app.
+read; photos up to 1 MB (the app sends a ~1024 px JPEG); 300 foods per `learn`, 2,000 in the
+dataset (the oldest drop first); 60 inbox writes an hour from the app; six months of menus.

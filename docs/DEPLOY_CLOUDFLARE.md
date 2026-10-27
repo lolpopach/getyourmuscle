@@ -28,7 +28,9 @@ the app already leaves out on any server that does not offer it.
   (`api/school-lunch.js`; by default `http://kshcm.net/?menu_no=34`, the 식단표 board) and
   shows how to eat it. The Worker keeps each month for six hours, and an older copy while the
   school's site is down. `LUNCH_URL` points it at another withschool.co.kr school's 식단표
-  page; `LUNCH_URL` set to an empty value turns the card off.
+  page; `LUNCH_URL` set to an empty value turns the card off. That page is filled in weeks
+  late; the scheduled Claude session (below) reads the school's monthly menu PDF and sends it,
+  and the card answers from it for the days the page does not have yet.
 - **Meals Claude works out.** A meal is counted from the app's food table the moment it is
   written. What the table cannot settle, and any photo, waits in an inbox in the Worker's
   storage for a Claude Code session scheduled on the owner's Claude account, which answers with

@@ -224,6 +224,42 @@ test('lunch: LUNCH_URL points at another school, and empty turns it off', async 
   assert.equal((await off.call('GET', '/api/lunch?date=2026-10-02', { cookie: off.cookieFor('u1') })).status, 404)
 })
 
+test('lunch: the month Claude read off the school\'s PDF answers for the days the calendar page lacks', async () => {
+  const { fetch } = school()
+  const { call, cookieFor, addUser } = setup({}, { fetch })
+  addUser('u1'); addUser('u2')
+  const cookie = cookieFor('u1')
+  const token = (await call('POST', '/api/account/claude-token', { cookie })).body.token
+  const claude = { authorization: 'Bearer ' + token, 'sec-fetch-site': '' }
+  const menu = { month: '2026-10', days: { '2026-10-01': ['PDF 흰쌀밥', '순두부찌개'], '2026-10-26': ['흰쌀밥', '돈육콩비지찌개', '치즈함박카츠*브라운S'] } }
+  assert.equal((await call('POST', '/api/claude/lunch', { cookie, body: menu })).status, 401)
+  assert.equal((await call('POST', '/api/claude/lunch', { headers: claude, body: { month: '2026-10', days: { '2026-11-02': ['x'] } } })).status, 400)
+  assert.equal((await call('POST', '/api/claude/lunch', { headers: claude, body: { month: '2026-10', days: { '2026-10-26': [] } } })).status, 400)
+  assert.deepEqual((await call('POST', '/api/claude/lunch', { headers: claude, body: menu })).body, { ok: true, month: '2026-10', days: 2 })
+  assert.deepEqual(Object.keys((await call('GET', '/api/claude/lunch', { headers: claude })).body.months), ['2026-10'])
+
+  // The calendar page has the 1st: it wins. It does not have the 26th yet: the PDF answers.
+  assert.equal((await call('GET', '/api/lunch?date=2026-10-01', { cookie })).body.meals[0].dishes[0], '흰쌀밥')
+  assert.deepEqual((await call('GET', '/api/lunch?date=2026-10-26', { cookie })).body.meals, [{ label: '중식', dishes: ['흰쌀밥', '돈육콩비지찌개', '치즈함박카츠*브라운S'] }])
+  // With the school's site down and nothing cached, the PDF still answers.
+  fetch.down = true
+  const fresh = setup({}, { fetch })
+  fresh.addUser('u1')
+  const tok2 = (await fresh.call('POST', '/api/account/claude-token', { cookie: fresh.cookieFor('u1') })).body.token
+  await fresh.call('POST', '/api/claude/lunch', { headers: { authorization: 'Bearer ' + tok2, 'sec-fetch-site': '' }, body: menu })
+  assert.equal((await fresh.call('GET', '/api/lunch?date=2026-10-26', { cookie: fresh.cookieFor('u1') })).body.meals[0].dishes[1], '돈육콩비지찌개')
+  // Another profile on the same instance does not see it.
+  fetch.down = false
+  assert.deepEqual((await call('GET', '/api/lunch?date=2026-10-26', { cookie: cookieFor('u2') })).body.meals, [])
+  // Not even one whose id differs only where the other has a `_` (a wildcard to SQL's LIKE).
+  addUser('a_b'); addUser('aXb')
+  const tokFor = async id => ({ authorization: 'Bearer ' + (await call('POST', '/api/account/claude-token', { cookie: cookieFor(id) })).body.token, 'sec-fetch-site': '' })
+  const ab = await tokFor('a_b'), axb = await tokFor('aXb')
+  await call('POST', '/api/claude/lunch', { headers: axb, body: { month: '2026-09', days: { '2026-09-01': ['흰쌀밥'] } } })
+  await call('POST', '/api/claude/lunch', { headers: ab, body: menu })
+  assert.deepEqual(Object.keys((await call('GET', '/api/claude/lunch', { headers: ab })).body.months), ['2026-10'])
+})
+
 const PHOTO = 'data:image/jpeg;base64,' + Buffer.from('not really a jpeg').toString('base64')
 
 test('Claude inbox: the app queues a meal, Claude reads it with its token and answers, the app applies it', async () => {

@@ -123,18 +123,46 @@ export async function fetchMonth(base, month, { fetch: fetchImpl = globalThis.fe
 export const isDay = s => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s + 'T00:00:00Z'));
 
 /**
- * The answer for one day, from a cached month (or none) and a way to fetch it. A fresh cache is
- * used as is; a stale one is refreshed, and kept when the school cannot be reached — yesterday's
- * menu beats an error. Returns { body, store } — `store` the month to cache, when it changed.
+ * A month's menu as the scheduled Claude session read it off the school's monthly PDF
+ * (school-menu-pdf.js, docs/dev/CLAUDE_MEALS.md) → { doc } or { error }. The calendar page is
+ * filled in weeks late; the PDF has the whole month ahead. Body: { month: 'YYYY-MM', days:
+ * { 'YYYY-MM-DD': ['흰쌀밥', …] }, pdf }, the lunch of each school day of that month; `pdf` a
+ * fingerprint of the file it was read from, so the next run knows that file was already sent.
  */
-export async function lunchFor(date, cached, fetchMonthFn, now = Date.now()) {
+export function parsePostedMenu(body, now = Date.now()) {
+  const month = typeof body?.month === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(body.month) ? body.month : null;
+  if (!month) return { error: 'month must be YYYY-MM' };
+  const src = body.days && typeof body.days === 'object' && !Array.isArray(body.days) ? body.days : null;
+  if (!src) return { error: 'days must map YYYY-MM-DD to a list of dishes' };
+  const days = {};
+  for (const [date, list] of Object.entries(src).slice(0, 31)) {
+    if (!isDay(date) || date.slice(0, 7) !== month) return { error: `${date} is not a day of ${month}` };
+    const dishes = (Array.isArray(list) ? list : []).filter(d => typeof d === 'string').map(d => d.replace(/\s+/g, ' ').trim().slice(0, 80)).filter(Boolean).slice(0, 30);
+    if (!dishes.length) return { error: `${date} has no dishes` };
+    days[date] = [{ label: '중식', dishes }];
+  }
+  const pdf = typeof body.pdf === 'string' && /^[0-9a-f]{8,64}$/.test(body.pdf) ? body.pdf : null;
+  return { doc: { month, days, ...(pdf ? { pdf } : {}), at: now } };
+}
+
+/**
+ * The answer for one day, from a cached month (or none), a way to fetch it, and the month as read
+ * off the school's PDF (parsePostedMenu, or null). A fresh cache is used as is; a stale one is
+ * refreshed, and kept when the school cannot be reached — yesterday's menu beats an error. The
+ * calendar page wins for a day it has (it is what was served); the PDF answers for the days it
+ * does not have yet. Returns { body, store } — `store` the month to cache, when it changed.
+ */
+export async function lunchFor(date, cached, fetchMonthFn, now = Date.now(), posted = null) {
   const month = date.slice(0, 7);
+  const pdf = posted && posted.month === month ? posted : null;
   let doc = cached && cached.month === month ? cached : null;
   let store = null;
   if (!doc || now - (doc.at || 0) > LUNCH_CACHE_MS) {
     const fresh = await fetchMonthFn(month);
     if (!fresh.error) { doc = fresh; store = fresh; }
-    else if (!doc) return { error: fresh.error };
+    else if (!doc && !pdf) return { error: fresh.error };
   }
-  return { body: { date, meals: doc.days[date] || [], photo: doc.photos?.[date] || null, fetchedAt: doc.at || null }, store };
+  const board = doc?.days?.[date] || [];
+  const meals = board.length ? board : pdf?.days?.[date] || [];
+  return { body: { date, meals, photo: doc?.photos?.[date] || null, fetchedAt: (board.length ? doc.at : pdf?.at ?? doc?.at) || null }, store };
 }

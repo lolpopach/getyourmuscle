@@ -1777,6 +1777,56 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+  /api/claude/lunch:
+    get:
+      tags: [gplan]
+      operationId: claudeLunchMenus
+      summary: 'Claude: the monthly menus sent so far'
+      description: The months the scheduled session read off the school's menu PDF, so it can tell whether a month is already up to date. Six months at most.
+      security: [{ claudeToken: [] }]
+      responses:
+        '200':
+          description: By month.
+          content:
+            application/json:
+              schema: { type: object, properties: { months: { type: object, additionalProperties: { type: object, properties: { month: { type: string }, days: { type: object, additionalProperties: { type: array, items: { type: object, properties: { label: { type: string }, dishes: { type: array, items: { type: string } } } } } }, pdf: { type: string }, at: { type: integer } } } } } }
+        '401':
+          description: No token, or not a valid one.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      tags: [gplan]
+      operationId: claudeLunchMenu
+      summary: 'Claude: a month''s menu from the school''s PDF'
+      description: The school posts the whole month as a PDF ahead of time, while its calendar page is filled in weeks late. GET /api/lunch answers from the calendar page for a day it has, and from this menu for the others. Replaces the month sent before.
+      security: [{ claudeToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [month, days], properties: { month: { type: string, example: '2026-10' }, pdf: { type: string, description: 'A fingerprint (hex) of the PDF the menu was read from, given back by GET so the next run knows that file was already sent.' }, days: { type: object, description: Each school day of the month and its lunch dishes as the PDF writes them, allergy codes left out., additionalProperties: { type: array, maxItems: 30, items: { type: string } } } } }
+      responses:
+        '200':
+          description: Stored.
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean }, month: { type: string }, days: { type: integer } } }
+        '400':
+          description: No month, a day outside it, or a day without dishes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: No token, or not a valid one.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: No school menu is set up (LUNCH_URL empty).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/device-link/options:
     post:
