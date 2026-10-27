@@ -18,6 +18,7 @@ import { dayOf, dayTotals, slotTotals, remaining, addMeal, removeMeal, toggleSup
 import Icon from './Icon.jsx'
 import { Row, Button, NumberField } from './ui.jsx'
 import { SmartEntry, LunchCard, useFoodFeatures, useClaudeSync } from './GplanFood.jsx'
+import { useHealthToken, useOnReturn, runShortcut } from './AppleHealth.jsx'
 
 const ui = () => useUI.getState()
 const update = (...a) => useStore.getState().update(...a)
@@ -44,8 +45,11 @@ function Bar({ value, max, color = 'var(--acc)' }) {
 
 // The day's numbers from Apple Health (components/AppleHealth.jsx, api/health.js), while signed
 // in to a server that has them. null otherwise — the card then shows only what was typed.
+// Read again when the app comes back to the front, which is when the Shortcut has just run.
 function useSynced(iso, enabled) {
   const [day, setDay] = useState(null)
+  const [back, setBack] = useState(0)
+  useOnReturn(() => setBack(n => n + 1), enabled)
   useEffect(() => {
     if (!enabled) { setDay(null); return }
     let live = true
@@ -53,7 +57,7 @@ function useSynced(iso, enabled) {
       .then(r => { if (live) setDay(r?.days?.[iso] || null) })
       .catch(() => { if (live) setDay(null) })
     return () => { live = false }
-  }, [iso, enabled])
+  }, [iso, enabled, back])
   return day
 }
 
@@ -74,6 +78,8 @@ export function GplanTodayCard({ onWorkout }) {
   const plan = S.gplan
   const synced = useSynced(iso, !!user && !DEMO && !MOBILE)
   useClaudeSync()
+  // With a Shortcut set up, the steps row runs it in one tap (components/AppleHealth.jsx).
+  const healthOn = !!useHealthToken(!!user && !DEMO && !MOBILE).st?.active
   if (!plan) return null
 
   const day = dayOf(S, iso)
@@ -141,6 +147,7 @@ export function GplanTodayCard({ onWorkout }) {
         subtitle={`${n0(steps)} / ${n0(goals.steps || 9000)}${km ? ' · ' + km.toFixed(1) + ' km' : ''}${synced ? ' · 🍎' : ''}`}
         onClick={() => numberSheet({ iso, field: 'steps', title: t('Steps'), unit: t('steps'), value: Number(day.steps) || steps || null, decimal: false })}>
         {steps >= (goals.steps || 9000) && <Icon name="checkCircle" style={{ fontSize: 18, color: 'var(--green)' }} />}
+        {healthOn && iso === today && <Button size="sm" onClick={e => { e.stopPropagation(); runShortcut() }} aria-label={t('Sync now')}><Icon name="reset" /></Button>}
       </Row>
       <Row icon="cloud" iconTint="var(--blue)" title={t('Water')} subtitle={`${(water / 1000).toFixed(1)} / ${((goals.waterMl || 3500) / 1000).toFixed(1)} L`}>
         <Button size="sm" onClick={() => numberSheet({ iso, field: 'water', title: t('Water'), unit: 'ml', value: water || null, decimal: false })} aria-label={t('Edit')}><Icon name="pencil" /></Button>

@@ -19,6 +19,7 @@ vi.mock('../store/useUI.js', () => {
   return { useUI }
 })
 vi.mock('../lib/api.js', () => ({ api: vi.fn(() => Promise.reject(new Error('offline'))) }))
+const { api } = await import('../lib/api.js')
 
 const { GplanTodayCard } = await import('./GplanToday.jsx')
 const { GplanProgressCard, GplanStartCard } = await import('./GplanSetup.jsx')
@@ -92,6 +93,37 @@ describe('today card', () => {
     await settle()
     expect(S().gday[today].meals.d).toMatchObject([{ name: '연어 덮밥', kcal: 650, p: 40 }])
     expect(S().gplan.templates.at(-1)).toMatchObject({ slot: 'd', name: '연어 덮밥', kcal: 650 })
+  })
+})
+
+describe('Apple Health on the steps row', () => {
+  afterEach(() => { api.mockImplementation(() => Promise.reject(new Error('offline'))) })
+
+  it('runs the Shortcut from the row and reads the day again on coming back', async () => {
+    let steps = 4100
+    api.mockImplementation(async path => {
+      if (path === '/api/account/health-token') return { active: true, created: 1, lastSync: 2, last: null }
+      if (path.startsWith('/api/health/daily')) return { days: { [today]: { steps, distKm: steps / 1400, at: 2 } } }
+      throw new Error('offline')
+    })
+    useStore.setState({ user: { id: 'u1', name: 'Chan' } })
+    const host = mount(<GplanTodayCard />)
+    await settle()
+    const row = rowTitled(host, 'Steps')
+    expect(row.textContent).toContain('4,100')
+    expect(row.querySelector('[aria-label="Sync now"]')).toBeTruthy()
+    // Back from the Shortcut: the app comes to the front and asks again.
+    steps = 9300
+    act(() => document.dispatchEvent(new Event('visibilitychange')))
+    await settle()
+    expect(rowTitled(host, 'Steps').textContent).toContain('9,300')
+  })
+
+  it('has no sync button without a Shortcut set up', async () => {
+    useStore.setState({ user: { id: 'u1', name: 'Chan' } })
+    const host = mount(<GplanTodayCard />)
+    await settle()
+    expect(rowTitled(host, 'Steps').querySelector('[aria-label="Sync now"]')).toBeNull()
   })
 })
 
