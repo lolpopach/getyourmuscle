@@ -1,6 +1,7 @@
 // G-PLAN's food helpers inside the meal sheet (docs/dev/GETYOURMUSCLE_PLAN.md §4.6): the
-// calculator — a photo read by the server's free vision model, or dishes typed by name — and the
-// school lunch with how to eat it, the owner's dislikes left out. The numbers are lib/foods.js,
+// calculator — photos read by the server's free vision model, or dishes typed by name, at a
+// table of one or a shared one — and the school lunch with how to eat it, the owner's dislikes
+// left out. The numbers are lib/foods.js,
 // lib/food-calc.js and lib/lunch.js; this file only lays them out.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store/useStore.js'
@@ -9,7 +10,7 @@ import { t, dateLocale } from '../lib/i18n.js'
 import { api } from '../lib/api.js'
 import { fmtDate } from '../lib/format.js'
 import { foodNames } from '../lib/foods.js'
-import { calcRow, rowsFromPhoto, renameRow, rowFood, rowNutrition, calcTotals, calcMealItem } from '../lib/food-calc.js'
+import { calcRow, rowsFromPhoto, renameRow, rowFood, rowNutrition, countInPieces, setPieces, calcTotals, calcMealItem, MAX_SERVINGS, MAX_PIECES } from '../lib/food-calc.js'
 import { parseMenu, planLunch, lunchTarget, lunchMealItem, setDislike, isDisliked, fmtServings } from '../lib/lunch.js'
 import { addMeal, saveTemplate } from '../lib/gplan-day.js'
 import Icon from './Icon.jsx'
@@ -35,12 +36,7 @@ export function useFoodFeatures() {
  */
 export function FoodEntryButtons({ iso, slot, photo }) {
   return <div style={{ display: 'grid', gridTemplateColumns: photo ? '1fr 1fr' : '1fr', gap: 8, marginBottom: 14 }}>
-    {photo && <label className="btn tinted sm" style={{ width: '100%', position: 'relative', overflow: 'hidden' }}>
-      <Icon name="camera" /><span>{t('Photo')}</span>
-      <input type="file" accept="image/*" aria-label={t('Photo')}
-        style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'pointer' }}
-        onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) foodCalcSheet(iso, slot, f) }} />
-    </label>}
+    {photo && <PhotoPicker label={t('Photo')} className="btn tinted sm" style={{ width: '100%' }} onFile={f => foodCalcSheet(iso, slot, f)} />}
     <Button size="sm" variant="tinted" icon="list" style={{ width: '100%' }} onClick={() => foodCalcSheet(iso, slot)}>{t('By food name')}</Button>
   </div>
 }
@@ -77,71 +73,129 @@ function photoError(e) {
   return t('The photo could not be read — try again, or add the dishes by name.')
 }
 
+// How a countable dish is counted, in the language of the moment.
+const PIECE_UNIT = { slice: () => t('slices'), piece: () => t('pieces'), each: () => t('pcs') }
+
+// A label whose file input opens the camera or the library: the tap is the user's own (iOS
+// refuses a script's input.click() from inside a sheet).
+function PhotoPicker({ label, className, style, onFile }) {
+  return <label className={className} style={{ position: 'relative', overflow: 'hidden', ...style }}>
+    <Icon name="camera" /><span>{label}</span>
+    <input type="file" accept="image/*" aria-label={label}
+      style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'pointer' }}
+      onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFile(f) }} />
+  </label>
+}
+
+let photoSeq = 0
+
+/**
+ * The calculator: rows of dishes and amounts, from photos (any number — a plate that came later
+ * is one more photo) or typed by name. At a shared table the shared dishes count the owner's
+ * share only; a dish counted by the piece is what the owner ate.
+ */
 function FoodCalcSheet({ iso, slot, file, close }) {
+  const features = useFoodFeatures()
   const [rows, setRows] = useState(() => (file ? [] : [calcRow('', 1)]))
-  const [photo, setPhoto] = useState(file ? { phase: 'reading', preview: null } : null)
+  const [photos, setPhotos] = useState([])   // [{ id, preview, data, phase: 'reading'|'done'|'error', error }]
   const [note, setNote] = useState('')
+  const [share, setShare] = useState({ on: false, people: 2, pct: 50 })
   const [asTemplate, setAsTemplate] = useState(false)
-  const image = useRef(null)
   const live = useRef(true)
   const started = useRef(false)
+  const sharing = useRef(share.on)
+  sharing.current = share.on
   const names = useMemo(() => foodNames(), [])
   useEffect(() => { live.current = true; return () => { live.current = false } }, [])
 
-  const read = async noteNow => {
-    if (!image.current) return
-    setPhoto(p => ({ ...p, phase: 'reading', error: null }))
+  const patchPhoto = (id, patch) => setPhotos(ps => ps.map(p => (p.id === id ? { ...p, ...patch } : p)))
+  // One photo read (again): its dishes replace the ones it gave before; every other row stays.
+  const readPhoto = async (id, data, noteNow) => {
+    patchPhoto(id, { phase: 'reading', error: null })
+    const shared = sharing.current
     try {
-      const r = await api('/api/meal/photo', { method: 'POST', body: JSON.stringify({ image: image.current, note: noteNow }), timeout: 70000 })
+      const r = await api('/api/meal/photo', { method: 'POST', body: JSON.stringify({ image: data, note: noteNow, shared }), timeout: 70000 })
       if (!live.current) return
-      setRows(rowsFromPhoto(r.items))
-      setPhoto(p => ({ ...p, phase: 'done' }))
+      setRows(rs => [...rs.filter(x => x.src !== id && (x.src || x.name.trim())), ...rowsFromPhoto(r.items, { src: id, shared })])
+      patchPhoto(id, { phase: 'done' })
     } catch (e) {
-      if (live.current) setPhoto(p => ({ ...p, phase: 'error', error: photoError(e) }))
+      if (live.current) patchPhoto(id, { phase: 'error', error: photoError(e) })
     }
+  }
+  const addPhoto = f => {
+    const id = 'p' + ++photoSeq
+    setPhotos(ps => [...ps, { id, preview: null, data: null, phase: 'reading', error: null }])
+    shrinkPhoto(f).then(data => {
+      if (!live.current) return
+      patchPhoto(id, { preview: data, data })
+      readPhoto(id, data, note)
+    }).catch(() => { if (live.current) patchPhoto(id, { phase: 'error', error: t('This photo could not be opened.') }) })
   }
   useEffect(() => {
     if (!file || started.current) return
     started.current = true
-    shrinkPhoto(file).then(data => {
-      if (!live.current) return
-      image.current = data
-      setPhoto({ phase: 'reading', preview: data })
-      read('')
-    }).catch(() => { if (live.current) setPhoto({ phase: 'error', error: t('This photo could not be opened.') }) })
+    addPhoto(file)
   }, [file])
 
+  const pct = Math.min(100, Math.max(1, Math.round(Number(share.pct) || 1)))
+  const frac = share.on ? pct / 100 : 1
+  const setSharing = on => {
+    setShare(s => ({ ...s, on }))
+    // Switched on, every dish so far is the table's; the owner marks what was only theirs.
+    if (on) setRows(rs => rs.map(r => (r.pieces == null ? { ...r, shared: true } : r)))
+  }
+  const setPeople = v => setShare(s => ({ ...s, people: v, pct: Math.round(100 / Math.max(1, Math.round(Number(v) || 1))) }))
+
   const setRow = (id, f) => setRows(rs => rs.map(r => (r.id === id ? f(r) : r)))
-  const totals = calcTotals(rows)
+  const totals = calcTotals(rows, frac)
+  const reading = photos.some(p => p.phase === 'reading')
   const add = () => {
-    const item = calcMealItem(rows, t('Meal'))
+    const item = calcMealItem(rows, t('Meal'), { share: frac, sharedName: (n, p) => t('{0} (shared, {1}%)', n, p) })
     update(st => {
       addMeal(st, iso, slot, item)
       if (asTemplate) saveTemplate(st, slot, item)
     })
     close()
   }
-  const reading = photo?.phase === 'reading'
 
   return <>
-    <h3 style={{ marginBottom: 2 }}>{file ? t('Meal photo') : t('Food calculator')}</h3>
+    <h3 style={{ marginBottom: 2 }}>{file || photos.length ? t('Meal photo') : t('Food calculator')}</h3>
     <div className="muted small" style={{ marginBottom: 12 }}>{fmtDate(iso, true)}</div>
 
-    {photo && <div className="row" style={{ gap: 12, alignItems: 'center', marginBottom: 10 }}>
-      {photo.preview && <img src={photo.preview} alt="" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 12, flex: 'none' }} />}
-      <div className="small" style={{ flex: 1, minWidth: 0, color: photo.phase === 'error' ? 'var(--orange)' : undefined }}>
-        {reading ? t('Reading the photo… about 10 seconds.') : photo.phase === 'error' ? photo.error : t('Check the dishes and amounts — the calories follow.')}
+    {photos.map(p => <div key={p.id} className="row" style={{ gap: 12, alignItems: 'center', marginBottom: 10 }}>
+      {p.preview ? <img src={p.preview} alt="" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 12, flex: 'none' }} />
+        : <div style={{ width: 56, height: 56, borderRadius: 12, background: 'var(--surface-2)', flex: 'none' }} />}
+      <div className="small" style={{ flex: 1, minWidth: 0, color: p.phase === 'error' ? 'var(--orange)' : undefined }}>
+        {p.phase === 'reading' ? t('Reading the photo… about 10 seconds.') : p.phase === 'error' ? p.error : t('Check the dishes and amounts — the calories follow.')}
       </div>
-    </div>}
-    {photo && !reading && image.current && <div className="row" style={{ gap: 8, marginBottom: 12 }}>
-      <TextField value={note} onChange={e => setNote(e.target.value)} maxLength={200} style={{ flex: 1, minWidth: 0 }}
-        placeholder={t('What the photo does not show, e.g. ate half the rice')} />
-      <Button size="sm" variant="tinted" onClick={() => read(note)}>{t('Read again')}</Button>
-    </div>}
+      {p.phase !== 'reading' && p.data && <Button size="sm" variant="tinted" onClick={() => readPhoto(p.id, p.data, note)}>{t('Read again')}</Button>}
+    </div>)}
+    {photos.length > 0 && <TextField value={note} onChange={e => setNote(e.target.value)} maxLength={200} style={{ marginBottom: 12 }}
+      placeholder={t('What the photo does not show, e.g. ate half the rice')} />}
+
+    <div style={{ background: 'var(--surface-2)', borderRadius: 14, padding: '10px 12px', marginBottom: 6 }}>
+      <div className="row between">
+        <b className="small">{t('Shared with others')}</b>
+        <Switch checked={share.on} onChange={setSharing} aria-label={t('Shared with others')} />
+      </div>
+      {share.on && <>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
+          <Stepper label={t('People at the table')} value={share.people} step={1} min={2} max={20} decimal={false} unit={t('people')} onChange={setPeople} />
+          <Stepper label={t('My share')} value={share.pct} step={5} min={5} max={100} decimal={false} unit="%" onChange={v => setShare(s => ({ ...s, pct: v }))} />
+        </div>
+        <div className="dim small" style={{ marginTop: 8 }}>
+          {t('Shared dishes count as {0}% of what was served. Tap “Shared” on a dish that was only yours. Another plate came? Raise its amount, or add a photo of it.', pct)}
+        </div>
+      </>}
+    </div>
 
     <datalist id="gplan-foods">{names.map(n => <option key={n} value={n} />)}</datalist>
-    {rows.map(r => <FoodRow key={r.id} row={r} onChange={f => setRow(r.id, f)} onRemove={() => setRows(rs => rs.filter(x => x.id !== r.id))} />)}
-    {!reading && <Button size="sm" variant="ghost" icon="plus" onClick={() => setRows(rs => [...rs, calcRow('', 1)])}>{t('Add a dish')}</Button>}
+    {rows.map(r => <FoodRow key={r.id} row={r} share={{ on: share.on, frac, pct }} onChange={f => setRow(r.id, f)}
+      onRemove={() => setRows(rs => rs.filter(x => x.id !== r.id))} />)}
+    <div className="row" style={{ gap: 8, marginTop: 6 }}>
+      <Button size="sm" variant="ghost" icon="plus" style={{ width: 'auto' }} onClick={() => setRows(rs => [...rs, calcRow('', 1, null, { shared: share.on })])}>{t('Add a dish')}</Button>
+      {features.photo && <PhotoPicker label={t('Add a photo')} className="btn ghost sm" onFile={addPhoto} />}
+    </div>
 
     <div className="row between" style={{ margin: '12px 0 4px' }}>
       <b>{t('Total')}</b>
@@ -158,11 +212,15 @@ function FoodCalcSheet({ iso, slot, file, close }) {
   </>
 }
 
-function FoodRow({ row, onChange, onRemove }) {
+function FoodRow({ row, share, onChange, onRemove }) {
   const r = rowFood(row)
-  const n = rowNutrition(row)
-  const unit = r?.food.cat === 'rice' ? t('bowl') : t('serving')
+  const piece = r?.food.piece || null
+  const byPiece = row.pieces != null && !!piece
+  const shared = share.on && row.shared && !byPiece
+  const n = rowNutrition(row, share.frac)
+  const servingUnit = r?.food.cat === 'rice' ? t('bowl') : t('serving')
   const badge = !r || r.how === 'exact' ? '' : r.how === 'similar' ? t('counted as {0}', r.food.name) : r.how === 'ai' ? t('AI estimate') : t('rough estimate')
+  const chip = on => 'chip nocap' + (on ? ' on' : '')
   return <div className="food-row" style={{ padding: '10px 0', borderBottom: '0.5px solid var(--sep)' }}>
     <div className="row" style={{ gap: 8 }}>
       <TextField value={row.name} list="gplan-foods" maxLength={40} style={{ flex: 1, minWidth: 0 }} placeholder={t('Dish name')}
@@ -172,13 +230,24 @@ function FoodRow({ row, onChange, onRemove }) {
     </div>
     <div className="row" style={{ gap: 10, marginTop: 8, alignItems: 'center' }}>
       <div style={{ width: 156, flex: 'none' }}>
-        <Stepper value={row.servings} step={0.25} min={0} max={6} unit={unit} onChange={v => onChange(x => ({ ...x, servings: v }))} />
+        {byPiece
+          ? <Stepper value={row.pieces} step={1} min={0} max={MAX_PIECES} decimal={false} unit={PIECE_UNIT[piece.kind]()} onChange={v => onChange(x => setPieces(x, v))} />
+          : <Stepper value={row.servings} step={0.25} min={0} max={MAX_SERVINGS} unit={servingUnit} onChange={v => onChange(x => ({ ...x, servings: v }))} />}
       </div>
       <div className="small" style={{ flex: 1, minWidth: 0, textAlign: 'right' }}>
         <b>{n0(n.kcal)} kcal</b> · {t('protein {0} g', n0(n.p))}
+        {shared && <div className="dim">{t('your {0}%', share.pct)}</div>}
         {badge && <div className="dim" style={{ color: r.how === 'similar' ? undefined : 'var(--orange)' }}>{badge}</div>}
       </div>
     </div>
+    {(piece || share.on) && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+      {piece && <>
+        <button className={chip(!byPiece)} onClick={() => onChange(x => countInPieces(x, false))} aria-pressed={!byPiece}>{servingUnit}</button>
+        <button className={chip(byPiece)} onClick={() => onChange(x => countInPieces(x, true))} aria-pressed={byPiece}>{PIECE_UNIT[piece.kind]()}</button>
+      </>}
+      {share.on && !byPiece && <button className={chip(row.shared)} aria-pressed={row.shared}
+        onClick={() => onChange(x => ({ ...x, shared: !x.shared }))}>{row.shared ? t('Shared') : t('Mine only')}</button>}
+    </div>}
   </div>
 }
 

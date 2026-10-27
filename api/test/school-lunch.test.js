@@ -47,7 +47,9 @@ test('the month cache: fresh is used, stale is refreshed, and kept when the scho
 });
 
 test('a photo request and a model answer, bounded', () => {
-  assert.deepEqual(parsePhotoBody({ image: 'data:image/png;base64,AAAA', note: '  밥   반만  ' }), { mediaType: 'image/png', data: 'AAAA', note: '밥 반만' });
+  assert.deepEqual(parsePhotoBody({ image: 'data:image/png;base64,AAAA', note: '  밥   반만  ' }), { mediaType: 'image/png', data: 'AAAA', note: '밥 반만', shared: false });
+  assert.equal(parsePhotoBody({ image: 'data:image/png;base64,AAAA', shared: 'yes' }).shared, false);
+  assert.equal(parsePhotoBody({ image: 'data:image/png;base64,AAAA', shared: true }).shared, true);
   assert.match(parsePhotoBody({ image: 'data:image/gif;base64,AAAA' }).error, /JPEG/);
   assert.match(parsePhotoBody({}).error, /data URL/);
   assert.match(parsePhotoBody({ image: 'data:image/jpeg;base64,' + 'A'.repeat(4 * 1024 * 1024 + 4) }).error, /too large/);

@@ -47,6 +47,23 @@ function mount(el) {
 const settle = () => act(() => new Promise(r => setTimeout(r, 0)))
 const button = (host, text) => [...host.querySelectorAll('button')].find(b => b.textContent.trim().startsWith(text))
 const exact = (host, text) => [...host.querySelectorAll('button')].find(b => b.textContent.trim() === text)
+const stepper = (host, label) => [...host.querySelectorAll('.stp-w')].find(w => w.querySelector('.stp-l')?.textContent === label)
+const foodRows = host => [...host.querySelectorAll('.food-row')]
+// happy-dom decodes no images: stand in for the decode and the canvas, for one test.
+function fakeImages() {
+  const orig = globalThis.Image
+  globalThis.Image = class { set src(_) { this.naturalWidth = 4000; this.naturalHeight = 3000; setTimeout(() => this.onload(), 0) } }
+  URL.createObjectURL = () => 'blob:x'
+  URL.revokeObjectURL = () => {}
+  const sizes = []
+  HTMLCanvasElement.prototype.getContext = function () { sizes.push([this.width, this.height]); return { drawImage() {} } }
+  HTMLCanvasElement.prototype.toDataURL = () => 'data:image/jpeg;base64,AAAA'
+  return { sizes, restore: () => { globalThis.Image = orig } }
+}
+const pick = input => {
+  Object.defineProperty(input, 'files', { configurable: true, value: [new File(['x'], 'meal.jpg', { type: 'image/jpeg' })] })
+  act(() => input.dispatchEvent(new Event('change', { bubbles: true })))
+}
 const openTop = () => mount(sheets.at(-1)(vi.fn()))
 const S = () => useStore.getState().S
 const type = (el, v) => act(() => {
@@ -101,32 +118,50 @@ describe('the calculator', () => {
 
 describe('a meal photo', () => {
   it('sends a small JPEG, lists what the server named, and logs it from the food table', async () => {
-    // happy-dom decodes no images: stand in for the decode and the canvas.
-    const origImage = globalThis.Image
-    globalThis.Image = class { set src(_) { this.naturalWidth = 4000; this.naturalHeight = 3000; setTimeout(() => this.onload(), 0) } }
-    URL.createObjectURL = () => 'blob:x'
-    URL.revokeObjectURL = () => {}
-    const sizes = []
-    HTMLCanvasElement.prototype.getContext = function () { sizes.push([this.width, this.height]); return { drawImage() {} } }
-    HTMLCanvasElement.prototype.toDataURL = () => 'data:image/jpeg;base64,AAAA'
+    const images = fakeImages()
     answers['/api/meal/photo'] = { items: [{ name: '흰쌀밥', servings: 0.5, kcal: 999 }, { name: '제육볶음', servings: 1, kcal: 340, p: 20 }], provider: 'workers-ai' }
     try {
       mealSheet(DAY, 'd')
-      const meal = openTop()
-      const file = meal.querySelector('input[type=file]')
-      Object.defineProperty(file, 'files', { value: [new File(['x'], 'meal.jpg', { type: 'image/jpeg' })] })
-      act(() => file.dispatchEvent(new Event('change', { bubbles: true })))
+      pick(openTop().querySelector('input[type=file]'))
       const sheet = openTop()
       expect(sheet.textContent).toContain('Reading the photo')
       await settle(); await settle(); await settle()
-      expect(sizes).toEqual([[1024, 768]])
-      expect(calls.at(-1)).toEqual({ path: '/api/meal/photo', body: { image: 'data:image/jpeg;base64,AAAA', note: '' } })
+      expect(images.sizes).toEqual([[1024, 768]])
+      expect(calls.at(-1)).toEqual({ path: '/api/meal/photo', body: { image: 'data:image/jpeg;base64,AAAA', note: '', shared: false } })
       // The table's half bowl, not the model's 999.
       expect(sheet.textContent).toContain('Total485 kcal · protein 23 g')
       act(() => exact(sheet, 'Add').click())
       expect(S().gday[DAY].meals.d).toMatchObject([{ name: '흰쌀밥, 제육볶음', kcal: 485 }])
     } finally {
-      globalThis.Image = origImage
+      images.restore()
+    }
+  })
+
+  it('adds a plate that came later as one more photo, and reads one photo again on its own', async () => {
+    const images = fakeImages()
+    answers['/api/meal/photo'] = { items: [{ name: '흰쌀밥', servings: 1 }, { name: '제육볶음', servings: 1 }] }
+    try {
+      mealSheet(DAY, 'd')
+      pick(openTop().querySelector('input[type=file]'))
+      const sheet = openTop()
+      await settle(); await settle(); await settle()
+      expect(sheet.textContent).toContain('Total640 kcal')
+      // Another plate of 제육볶음 came to the table.
+      answers['/api/meal/photo'] = { items: [{ name: '제육볶음', servings: 1 }] }
+      pick(sheet.querySelector('input[aria-label="Add a photo"]'))
+      await settle(); await settle(); await settle()
+      expect(foodRows(sheet).map(r => r.querySelector('input').value)).toEqual(['흰쌀밥', '제육볶음', '제육볶음'])
+      expect(sheet.textContent).toContain('Total970 kcal')
+      // The first photo read again with a note: only its own dishes change.
+      answers['/api/meal/photo'] = { items: [{ name: '흰쌀밥', servings: 0.5 }, { name: '제육볶음', servings: 1 }] }
+      type(sheet.querySelector('input[placeholder^="What the photo"]'), 'ate half the rice')
+      act(() => [...sheet.querySelectorAll('button')].filter(b => b.textContent.trim() === 'Read again')[0].click())
+      await settle(); await settle()
+      expect(calls.at(-1).body.note).toBe('ate half the rice')
+      expect(foodRows(sheet).length).toBe(3)
+      expect(sheet.textContent).toContain('Total815 kcal')
+    } finally {
+      images.restore()
     }
   })
 
@@ -136,6 +171,73 @@ describe('a meal photo', () => {
     const meal = openTop()
     expect(meal.querySelector('input[type=file]')).toBeNull()
     expect(button(meal, 'By food name')).toBeTruthy()
+  })
+})
+
+describe('a shared table', () => {
+  const calcSheet = () => {
+    mealSheet(DAY, 'd')
+    const meal = openTop()
+    act(() => button(meal, 'By food name').click())
+    return openTop()
+  }
+
+  it('counts the owner\'s share of the shared dishes, and all of what was only theirs', () => {
+    const calc = calcSheet()
+    type(calc.querySelector('input[list="gplan-foods"]'), '삼겹살')
+    // 3 servings of 삼겹살 on the table.
+    const meat = foodRows(calc)[0]
+    act(() => meat.querySelector('.stp button[aria-label="Increase"]').click())
+    act(() => meat.querySelector('.stp button[aria-label="Increase"]').click())
+    for (let i = 0; i < 6; i++) act(() => meat.querySelector('.stp button[aria-label="Increase"]').click())
+    expect(calc.textContent).toContain('Total990 kcal')
+
+    act(() => calc.querySelector('[role=switch][aria-label="Shared with others"]').click())
+    expect(calc.textContent).toContain('Total495 kcal')   // two people: half
+    act(() => stepper(calc, 'People at the table').querySelector('button[aria-label="Increase"]').click())
+    expect(calc.textContent).toContain('your 33%')
+    expect(calc.textContent).toContain('Total327 kcal')
+
+    // The owner's own bowl of rice: added as shared, marked as theirs.
+    act(() => button(calc, 'Add a dish').click())
+    type(foodRows(calc)[1].querySelector('input[list="gplan-foods"]'), '흰쌀밥')
+    act(() => exact(foodRows(calc)[1], 'Shared').click())
+    expect(exact(foodRows(calc)[1], 'Mine only')).toBeTruthy()
+    expect(calc.textContent).toContain('Total637 kcal')
+
+    act(() => exact(calc, 'Add').click())
+    expect(S().gday[DAY].meals.d).toMatchObject([{ name: '삼겹살, 흰쌀밥 (shared, 33%)', kcal: 637 }])
+  })
+
+  it('counts 삼겹살 by the slice as what the owner ate', () => {
+    const calc = calcSheet()
+    act(() => calc.querySelector('[role=switch][aria-label="Shared with others"]').click())
+    type(calc.querySelector('input[list="gplan-foods"]'), '삼겹살')
+    act(() => exact(foodRows(calc)[0], 'slices').click())
+    const meat = foodRows(calc)[0]
+    expect(meat.querySelector('.stp .val i').textContent).toBe('slices')
+    expect(exact(meat, 'Shared')).toBeUndefined()   // counted pieces are the owner's own
+    type(meat.querySelector('.stp input'), '9')
+    expect(calc.textContent).toContain('Total505 kcal · protein 26 g')
+    act(() => exact(calc, 'Add').click())
+    expect(S().gday[DAY].meals.d).toMatchObject([{ name: '삼겹살', kcal: 505 }])
+  })
+
+  it('tells the model when the photo is of a shared table', async () => {
+    const images = fakeImages()
+    answers['/api/meal/photo'] = { items: [{ name: '삼겹살', servings: 4 }] }
+    try {
+      const calc = calcSheet()
+      act(() => calc.querySelector('[role=switch][aria-label="Shared with others"]').click())
+      pick(calc.querySelector('input[aria-label="Add a photo"]'))
+      await settle(); await settle(); await settle()
+      expect(calls.at(-1).body.shared).toBe(true)
+      // 4 servings for the table, half of it the owner's; the empty row from the start is gone.
+      expect(foodRows(calc).length).toBe(1)
+      expect(calc.textContent).toContain('Total660 kcal')
+    } finally {
+      images.restore()
+    }
   })
 })
 

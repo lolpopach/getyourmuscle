@@ -1831,4 +1831,17 @@ export default {
   '{0} kcal over lunch’s share — eat that much less at dinner': '{0} kcal over lunch’s share — eat that much less at dinner',
   'Log it as suggested': 'Log it as suggested',
   'A food you don’t eat, e.g. eggplant': 'A food you don’t eat, e.g. eggplant',
+  // G-PLAN food: a shared table, more photos, counting by the piece (components/GplanFood.jsx)
+  'slices': 'slices',
+  'pieces': 'pieces',
+  'pcs': 'pcs',
+  'Add a photo': 'Add a photo',
+  'Shared with others': 'Shared with others',
+  'People at the table': 'People at the table',
+  'My share': 'My share',
+  'Shared dishes count as {0}% of what was served. Tap “Shared” on a dish that was only yours. Another plate came? Raise its amount, or add a photo of it.': 'Shared dishes count as {0}% of what was served. Tap “Shared” on a dish that was only yours. Another plate came? Raise its amount, or add a photo of it.',
+  'your {0}%': 'your {0}%',
+  'Shared': 'Shared',
+  'Mine only': 'Mine only',
+  '{0} (shared, {1}%)': '{0} (shared, {1}%)',
 }

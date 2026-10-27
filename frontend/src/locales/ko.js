@@ -1834,4 +1834,17 @@ export default {
   '{0} kcal over lunch’s share — eat that much less at dinner': '점심 몫보다 {0} kcal 많아요 — 저녁에서 그만큼 덜 먹으면 돼요',
   'Log it as suggested': '추천대로 기록',
   'A food you don’t eat, e.g. eggplant': '안 먹는 음식 (예: 가지)',
+  // G-PLAN food: a shared table, more photos, counting by the piece (components/GplanFood.jsx)
+  'slices': '점',
+  'pieces': '조각',
+  'pcs': '개',
+  'Add a photo': '사진 추가',
+  'Shared with others': '나눠 먹기',
+  'People at the table': '몇 명이서',
+  'My share': '내가 먹은 비율',
+  'Shared dishes count as {0}% of what was served. Tap “Shared” on a dish that was only yours. Another plate came? Raise its amount, or add a photo of it.': '같이 먹은 음식은 나온 양의 {0}%로 계산해요. 혼자 먹은 건 “같이 먹음”을 눌러 “내 것”으로 바꾸세요. 접시가 더 나오면 양을 올리거나 사진을 추가하세요.',
+  'your {0}%': '내 몫 {0}%',
+  'Shared': '같이 먹음',
+  'Mine only': '내 것',
+  '{0} (shared, {1}%)': '{0} (나눠 먹기 {1}%)',
 }

@@ -256,6 +256,12 @@ test('meal photo: Workers AI names the dishes, and nothing is set up without a m
   assert.equal(user[0].text, "User's note: 밥 반만 먹음")
   assert.equal(user[1].image_url.url, PHOTO)
   assert.deepEqual(runs[0].input.chat_template_kwargs, { enable_thinking: false })
+
+  // A shared table: the model is told to count what was served for everyone.
+  await call('POST', '/api/meal/photo', { cookie, body: { image: PHOTO, shared: true } })
+  const text = runs[1].input.messages[1].content[0].text
+  assert.match(text, /^This is a shared table/)
+  assert.match(text, /No note from the user\.$/)
 })
 
 test('meal photo: a Gemini key wins over Workers AI, keeps the key out of the URL, and errors map', async () => {

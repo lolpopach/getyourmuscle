@@ -75,8 +75,9 @@ export const PHOTO_SCHEMA = {
 };
 
 /**
- * The app's request → { mediaType, data, note } or { error }. `image` is a data URL
- * (data:image/jpeg;base64,…), the shape a canvas hands out.
+ * The app's request → { mediaType, data, note, shared } or { error }. `image` is a data URL
+ * (data:image/jpeg;base64,…), the shape a canvas hands out; `shared` says the photo is of a
+ * table several people eat from, whose dishes the app divides by the owner's share itself.
  */
 export function parsePhotoBody(body) {
   const m = /^data:(image\/[\w.+-]+);base64,([A-Za-z0-9+/]+={0,2})$/.exec(typeof body?.image === 'string' ? body.image : '');
@@ -84,10 +85,13 @@ export function parsePhotoBody(body) {
   if (!MEDIA_TYPES.has(m[1])) return { error: 'image must be JPEG, PNG or WebP' };
   if (Math.floor(m[2].length * 3 / 4) > MAX_IMAGE_BYTES) return { error: 'image is too large' };
   const note = typeof body.note === 'string' ? body.note.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
-  return { mediaType: m[1], data: m[2], note };
+  return { mediaType: m[1], data: m[2], note, shared: body.shared === true };
 }
 
-const userText = note => note ? `User's note: ${note}` : 'No note from the user.';
+// A shared table: the app takes the owner's share of each dish itself, so the model must count
+// what was served, not guess one person's part of it (it would be divided twice).
+const SHARED_TEXT = 'This is a shared table: several people eat from these dishes. Give the servings of each dish as served on the table for everyone, not one person\'s share; the app divides it.';
+const userText = ({ note, shared }) => [shared ? SHARED_TEXT : '', note ? `User's note: ${note}` : 'No note from the user.'].filter(Boolean).join('\n');
 
 /** The answer text → parsed JSON, tolerating a fence or prose around the object. */
 export function parseAnswer(raw) {
@@ -121,7 +125,8 @@ export function normalizeRecognition(answer) {
   return { isFood: answer?.is_food !== false && items.length > 0, items };
 }
 
-async function viaGemini(provider, { mediaType, data, note }, fetchImpl) {
+async function viaGemini(provider, input, fetchImpl) {
+  const { mediaType, data } = input;
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   try {
@@ -131,7 +136,7 @@ async function viaGemini(provider, { mediaType, data, note }, fetchImpl) {
       headers: { 'content-type': 'application/json', 'x-goog-api-key': provider.key },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: PHOTO_PROMPT }] },
-        contents: [{ role: 'user', parts: [{ inlineData: { mimeType: mediaType, data } }, { text: userText(note) }] }],
+        contents: [{ role: 'user', parts: [{ inlineData: { mimeType: mediaType, data } }, { text: userText(input) }] }],
         generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 8192 }
       }),
       signal: ctl.signal
@@ -149,11 +154,12 @@ async function viaGemini(provider, { mediaType, data, note }, fetchImpl) {
   }
 }
 
-async function viaWorkersAi(provider, { mediaType, data, note }) {
+async function viaWorkersAi(provider, photo) {
+  const { mediaType, data } = photo;
   const input = {
     messages: [
       { role: 'system', content: PHOTO_PROMPT },
-      { role: 'user', content: [{ type: 'text', text: userText(note) }, { type: 'image_url', image_url: { url: `data:${mediaType};base64,${data}` } }] }
+      { role: 'user', content: [{ type: 'text', text: userText(photo) }, { type: 'image_url', image_url: { url: `data:${mediaType};base64,${data}` } }] }
     ],
     response_format: { type: 'json_schema', json_schema: { name: 'meal', schema: PHOTO_SCHEMA, strict: true } },
     max_tokens: 2048
