@@ -33,7 +33,7 @@ import { createDeviceLink, findDeviceLink, burnDeviceLink, dropDeviceLinks } fro
 import { createMediaStore, mediaLimits, mediaConfig, MediaError, HASH_RE } from './media.js';
 import { issueHealthToken, revokeHealthToken, findHealthUser, parseIngest, mergeIngest, daysFrom } from './health.js';
 import { fetchMonth, lunchFor, isDay } from './school-lunch.js';
-import { photoProvider, parsePhotoBody, recognizeMeal } from './meal-photo.js';
+import { newClaudeToken, hashClaudeToken, looksLikeClaudeToken, bearerOf, parseInboxEntry, appEntry, claudeEntry, parseResult, mergeFoods, MAX_PENDING } from './claude-inbox.js';
 
 const PORT = +(process.env.PORT || 3000);
 const DATA = process.env.DATA_DIR || '/data';
@@ -74,11 +74,9 @@ const TRUST_PROXY = /^(1|true|yes|on)$/i.test(process.env.TRUST_PROXY || '');
 // baked into each cookie when it's issued, so lowering this never cuts an existing session short.
 const SESSION_DAYS = Math.max(1, +(process.env.SESSION_DAYS || 90) || 90);
 // G-PLAN (docs/dev/GETYOURMUSCLE_PLAN.md): the school lunch menu read off a withschool.co.kr
-// 식단표 page (LUNCH_URL, school-lunch.js) and meal photos read by Gemini (GEMINI_API_KEY, a free
-// Google AI Studio key; meal-photo.js). Both off unless set, so an instance without them answers
+// 식단표 page (LUNCH_URL, school-lunch.js), off unless set, so an instance without it answers
 // exactly as before.
 const LUNCH_BASE = String(process.env.LUNCH_URL || '').trim();
-const PHOTO = photoProvider({ GEMINI_API_KEY: process.env.GEMINI_API_KEY, GEMINI_MODEL: process.env.GEMINI_MODEL });
 const LUNCH_MONTHS = new Map();   // 'YYYY-MM' → the month's menu as last fetched, a few months at most
 const MAX_BODY = 5 * 1024 * 1024;
 // Secure cookies require HTTPS; over plain http://localhost the flag would drop the cookie
@@ -138,6 +136,34 @@ function readState(uid) {
 // What an iOS Shortcut sent from Apple Health (health.js). Kept apart from the state document so
 // a sync from the phone never races the app's own PUT /api/data.
 const healthFile = uid => path.join(DATA, 'health-' + uid.replace(/[^a-zA-Z0-9_-]/g, '') + '.json');
+// G-PLAN's inbox for Claude and the dataset of foods Claude worked out (claude-inbox.js), each a
+// document per profile next to the state document, written by the same atomic pattern.
+const inboxFile = uid => path.join(DATA, 'inbox-' + uid.replace(/[^a-zA-Z0-9_-]/g, '') + '.json');
+const foodsFile = uid => path.join(DATA, 'foods-' + uid.replace(/[^a-zA-Z0-9_-]/g, '') + '.json');
+const readDoc = (file, empty) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return empty; } };
+const readInbox = uid => { const d = readDoc(inboxFile(uid), null); return Array.isArray(d?.entries) ? d.entries : []; };
+const writeInbox = (uid, entries) => atomicWrite(inboxFile(uid), JSON.stringify({ entries }), 0o600);
+const readFoods = uid => readDoc(foodsFile(uid), { foods: [] });
+// The profile a Claude token belongs to, or null. A disabled profile's token works no more than
+// its sessions do.
+function findClaudeUser(token) {
+  if (!looksLikeClaudeToken(token)) return null;
+  const h = Buffer.from(hashClaudeToken(token), 'hex');
+  return db.users.find(u => {
+    if (!u?.claudeTok?.h || u.disabled) return false;
+    const stored = Buffer.from(u.claudeTok.h, 'hex');
+    return stored.length === h.length && crypto.timingSafeEqual(stored, h);
+  }) || null;
+}
+// The profile behind a request's Claude token. A wrong token counts against the address (the
+// THROTTLED map); a right one is dated for the settings card.
+function claudeUser(req) {
+  const user = findClaudeUser(bearerOf(req.headers.authorization));
+  if (!user) { strikeAddress(req, 'claude'); return null; }
+  user.claudeTok.used = Date.now();
+  saveDb();
+  return user;
+}
 function readHealth(uid) {
   try { return JSON.parse(fs.readFileSync(healthFile(uid), 'utf8')); } catch { return { days: {} }; }
 }
@@ -832,9 +858,9 @@ const ACCOUNT_FAILS = createBackoff({
 });
 // Apple Health syncs per profile: a Shortcut runs once or twice a day, so this only stops a loop.
 const HEALTH_WRITES = createWindow({ max: 60, windowMs: 3600000 });
-// A meal photo is a call against the provider's free allowance: a few per meal is plenty.
-const MEAL_PHOTOS = createWindow({ max: 30, windowMs: 3600000 });
-setInterval(() => { AUTH_BURST.sweep(); ADDR_FAILS.sweep(); ACCOUNT_FAILS.sweep(); HEALTH_WRITES.sweep(); MEAL_PHOTOS.sweep(); }, 60000).unref();
+// Meals sent to Claude's inbox: a few a meal is plenty, and each may carry a photo.
+const INBOX_WRITES = createWindow({ max: 60, windowMs: 3600000 });
+setInterval(() => { AUTH_BURST.sweep(); ADDR_FAILS.sweep(); ACCOUNT_FAILS.sweep(); HEALTH_WRITES.sweep(); INBOX_WRITES.sweep(); }, 60000).unref();
 
 // Route -> the kind of failure it can count. Every route listed here also spends the burst
 // budget; `null` spends only that.
@@ -851,7 +877,10 @@ const THROTTLED = {
   'POST /api/account/passkeys/options': null, 'POST /api/account/device-link': null,
   'DELETE /api/account/passkeys': null,
   // A wrong Apple Health token counts against the address like a wrong device-link code.
-  'POST /api/health/ingest': 'health'
+  'POST /api/health/ingest': 'health',
+  // So does a wrong Claude token (G-PLAN's inbox).
+  'GET /api/claude/inbox': 'claude', 'POST /api/claude/result': 'claude',
+  'GET /api/claude/foods': 'claude', 'POST /api/claude/foods': 'claude'
 };
 
 // Which address the throttle counts against. Unlike clientIp() above, which only labels a log
@@ -1782,9 +1811,10 @@ const routes = {
       // Public like the two flags above: the caps are not a secret, and the absence of the
       // block is how the app knows this server does not take photos and videos at all.
       ...(MEDIA_ON ? { media: mediaConfig(MEDIA_LIMITS) } : {}),
-      // G-PLAN's lunch card and photo button, only when this instance has them.
+      // G-PLAN's lunch card, only when this instance has it; and whether this profile has a
+      // Claude token, only once it has one (its meals then go to Claude's inbox).
       ...(LUNCH_BASE ? { lunch: true } : {}),
-      ...(PHOTO ? { meal_photo: true } : {}),
+      ...(readSession(req)?.claudeTok ? { claude: { linked: true } } : {}),
       ...(readSession(req) ? { coach: coachConfig.publicConfig() } : {})
     });
   },
@@ -2141,7 +2171,7 @@ const routes = {
     json(res, 200, { days: daysFrom(readHealth(user.id), from) });
   },
 
-  /* ---------- G-PLAN: the school lunch menu (school-lunch.js) and meal photos (meal-photo.js) ---------- */
+  /* ---------- G-PLAN: the school lunch menu (school-lunch.js) ---------- */
   'GET /api/lunch': async (req, res) => {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
@@ -2156,17 +2186,93 @@ const routes = {
     }
     json(res, 200, r.body);
   },
-  'POST /api/meal/photo': async (req, res) => {
+
+  /* ---------- G-PLAN: the inbox for Claude (claude-inbox.js) ----------
+     The owner issues the token; the app queues meals and reads results back; the scheduled
+     Claude session, holding the token, reads the pending meals and writes results and foods. */
+  'GET /api/account/claude-token': async (req, res) => {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
-    if (!PHOTO) return json(res, 404, { error: 'meal photos are not set up on this server' });
-    const wait = MEAL_PHOTOS.take(user.id);
+    const pending = readInbox(user.id).filter(e => e.status === 'pending').length;
+    json(res, 200, { active: !!user.claudeTok, created: user.claudeTok?.created || null, used: user.claudeTok?.used || null, pending });
+  },
+  'POST /api/account/claude-token': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    const token = newClaudeToken();
+    user.claudeTok = { h: hashClaudeToken(token), created: Date.now(), used: null };
+    saveDb();
+    audit(req, 'auth.claude.issue', { user });
+    json(res, 200, { token, created: user.claudeTok.created });
+  },
+  'DELETE /api/account/claude-token': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    if (user.claudeTok) { delete user.claudeTok; saveDb(); audit(req, 'auth.claude.revoke', { user }); }
+    json(res, 200, { active: false });
+  },
+  'POST /api/inbox': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    const wait = INBOX_WRITES.take(user.id);
     if (wait) return tooMany(res, wait);
-    const input = parsePhotoBody(await readBody(req));
-    if (input.error) return json(res, 400, { error: input.error });
-    const r = await recognizeMeal(PHOTO, input);
-    if (r.error) return json(res, r.status || 502, { error: r.error });
-    json(res, 200, r);
+    const p = parseInboxEntry(await readBody(req));
+    if (p.error) return json(res, 400, { error: p.error });
+    const entries = readInbox(user.id).filter(e => e.id !== p.entry.id);
+    if (entries.filter(e => e.status === 'pending').length >= MAX_PENDING) return json(res, 429, { error: 'the inbox is full — Claude has not read it for a while' });
+    writeInbox(user.id, [...entries, p.entry]);
+    json(res, 200, { ok: true, entry: appEntry(p.entry) });
+  },
+  'GET /api/inbox': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    json(res, 200, { entries: readInbox(user.id).map(appEntry) });
+  },
+  'POST /api/inbox/ack': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    const body = await readBody(req);
+    const ids = new Set((Array.isArray(body.ids) ? body.ids : []).filter(x => typeof x === 'string').slice(0, 100));
+    const entries = readInbox(user.id);
+    const kept = entries.filter(e => !ids.has(e.id));
+    if (kept.length !== entries.length) writeInbox(user.id, kept);
+    json(res, 200, { ok: true, removed: entries.length - kept.length });
+  },
+  'GET /api/foods': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    json(res, 200, { foods: readFoods(user.id).foods || [] });
+  },
+  'GET /api/claude/inbox': async (req, res) => {
+    const user = claudeUser(req);
+    if (!user) return json(res, 401, { error: 'invalid token' });
+    json(res, 200, { entries: readInbox(user.id).filter(e => e.status === 'pending').sort((a, b) => a.created - b.created).slice(0, 20).map(claudeEntry) });
+  },
+  'POST /api/claude/result': async (req, res) => {
+    const user = claudeUser(req);
+    if (!user) return json(res, 401, { error: 'invalid token' });
+    const r = parseResult(await readBody(req));
+    if (r.error) return json(res, 400, { error: r.error });
+    const entries = readInbox(user.id);
+    const e = entries.find(x => x.id === r.id);
+    if (!e) return json(res, 404, { error: 'no such entry — the owner may have deleted the meal' });
+    // The photo has done its job; the result is all the app needs.
+    Object.assign(e, { status: 'done', result: r.result, doneAt: Date.now(), photo: null });
+    writeInbox(user.id, entries);
+    json(res, 200, { ok: true, entry: appEntry(e) });
+  },
+  'GET /api/claude/foods': async (req, res) => {
+    const user = claudeUser(req);
+    if (!user) return json(res, 401, { error: 'invalid token' });
+    json(res, 200, { foods: readFoods(user.id).foods || [] });
+  },
+  'POST /api/claude/foods': async (req, res) => {
+    const user = claudeUser(req);
+    if (!user) return json(res, 401, { error: 'invalid token' });
+    const m = mergeFoods(readFoods(user.id), (await readBody(req)).foods);
+    if (m.error) return json(res, 400, { error: m.error });
+    atomicWrite(foodsFile(user.id), JSON.stringify(m.doc), 0o600);
+    json(res, 200, { ok: true, added: m.added, count: m.doc.foods.length });
   },
   'GET /api/push/public-key': async (req, res) => json(res, 200, { key: vapid.publicKey }),
 
@@ -2351,6 +2457,8 @@ const routes = {
     // The training history and any Coach credential of theirs, both outside db.json.
     try { fs.unlinkSync(stateFile(u.id)); } catch { /* already gone */ }
     try { fs.unlinkSync(healthFile(u.id)); } catch { /* never synced */ }
+    try { fs.unlinkSync(inboxFile(u.id)); } catch { /* nothing sent to Claude */ }
+    try { fs.unlinkSync(foodsFile(u.id)); } catch { /* no foods worked out */ }
     try { coachConfig.clearProfileAuth(u.id); } catch { /* nothing stored */ }
     // Their photos and videos — the one place a profile's folder under uploads/ is removed.
     try { MEDIA.removeUser(u.id); } catch (e) { console.error('media: could not remove uploads of', u.id, e.message); }

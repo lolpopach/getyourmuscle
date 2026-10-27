@@ -52,6 +52,9 @@ const LABELS = {
   // The Apple Health token an iOS Shortcut syncs with (api/health.js).
   'auth.health.issue': 'Made an Apple Health sync token',
   'auth.health.revoke': 'Revoked the Apple Health sync token',
+  // The token a scheduled Claude session reads G-PLAN's meal inbox with (api/claude-inbox.js).
+  'auth.claude.issue': 'Made a token for Claude',
+  'auth.claude.revoke': 'Revoked the Claude token',
   // The owner's proof (current password or a passkey) for one of the changes below was refused.
   'auth.proof.fail': 'Confirming a change failed',
   // The password throttle paused an address; `msg` says for what (password, signup).
@@ -99,6 +102,7 @@ const REASONS = {
   'signup': 'wrong invite codes on password signup',
   'link': 'wrong one-time device codes',
   'health': 'wrong Apple Health sync tokens',
+  'claude': 'wrong Claude tokens',
   'email': 'e-mail addresses already in use',
   // What a `media.throttled` pause was for.
   'upload': 'photo and video uploads',

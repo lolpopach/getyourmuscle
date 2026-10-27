@@ -226,78 +226,95 @@ test('lunch: LUNCH_URL points at another school, and empty turns it off', async 
 
 const PHOTO = 'data:image/jpeg;base64,' + Buffer.from('not really a jpeg').toString('base64')
 
-test('meal photo: Workers AI names the dishes, and nothing is set up without a model', async () => {
-  const none = setup()
-  none.addUser()
-  assert.equal((await none.call('GET', '/api/config')).body.meal_photo, false)
-  assert.equal((await none.call('POST', '/api/meal/photo', { cookie: none.cookieFor('u1'), body: { image: PHOTO } })).status, 404)
-
-  const runs = []
-  const AI = { run: async (model, input) => {
-    runs.push({ model, input })
-    return { choices: [{ message: { content: JSON.stringify({ is_food: true, items: [
-      { name: '흰쌀밥', servings: 0.5, grams: 105, kcal: 155, protein_g: 3, carbs_g: 34, fat_g: 0 },
-      { name: '제육볶음', servings: 1.1, grams: 160, kcal: 350, protein_g: 21, carbs_g: 12, fat_g: 23 },
-    ] }) } }] }
-  } }
-  const { call, cookieFor, addUser } = setup({ AI })
+test('Claude inbox: the app queues a meal, Claude reads it with its token and answers, the app applies it', async () => {
+  const { call, cookieFor, addUser } = setup()
   addUser()
   const cookie = cookieFor('u1')
-  assert.equal((await call('GET', '/api/config')).body.meal_photo, true)
-  assert.equal((await call('POST', '/api/meal/photo', { body: { image: PHOTO } })).status, 401)
-  assert.equal((await call('POST', '/api/meal/photo', { cookie, body: { image: 'https://example.com/a.jpg' } })).status, 400)
+  assert.deepEqual((await call('GET', '/api/config', { cookie })).body.claude, { linked: false })
+  assert.equal('claude' in (await call('GET', '/api/config')).body, false)
 
-  const r = await call('POST', '/api/meal/photo', { cookie, body: { image: PHOTO, note: '밥 반만 먹음' } })
-  assert.equal(r.status, 200)
-  assert.equal(r.body.provider, 'workers-ai')
-  assert.deepEqual(r.body.items.map(i => [i.name, i.servings]), [['흰쌀밥', 0.5], ['제육볶음', 1]])
-  assert.equal(runs[0].model, '@cf/google/gemma-4-26b-a4b-it')
-  const user = runs[0].input.messages[1].content
-  assert.equal(user[0].text, "User's note: 밥 반만 먹음")
-  assert.equal(user[1].image_url.url, PHOTO)
-  assert.deepEqual(runs[0].input.chat_template_kwargs, { enable_thinking: false })
+  // The owner issues a token for the scheduled Claude session.
+  const { token } = (await call('POST', '/api/account/claude-token', { cookie })).body
+  assert.match(token, /^gplanc_/)
+  assert.deepEqual((await call('GET', '/api/config', { cookie })).body.claude, { linked: true })
+  const claude = { authorization: 'Bearer ' + token, 'sec-fetch-site': '' }
 
-  // A shared table: the model is told to count what was served for everyone.
-  await call('POST', '/api/meal/photo', { cookie, body: { image: PHOTO, shared: true } })
-  const text = runs[1].input.messages[1].content[0].text
-  assert.match(text, /^This is a shared table/)
-  assert.match(text, /No note from the user\.$/)
+  // A meal written and photographed: saved at once, the photo kept for Claude only.
+  assert.equal((await call('POST', '/api/inbox', { body: { id: 'm0001', date: '2026-10-27', slot: 'd', text: 'x' } })).status, 401)
+  assert.equal((await call('POST', '/api/inbox', { cookie, body: { id: 'm0001', date: '2026-10-27', slot: 'x', text: '꿔바로우' } })).status, 400)
+  assert.equal((await call('POST', '/api/inbox', { cookie, body: { id: 'm0001', date: '2026-10-27', slot: 'd' } })).status, 400)
+  const sent = await call('POST', '/api/inbox', { cookie, body: { id: 'm0001', date: '2026-10-27', slot: 'd', mealId: 'meal-1', text: '꿔바로우 반 접시, 3명이서', photo: PHOTO, estimate: { kcal: 400, p: 20 } } })
+  assert.equal(sent.status, 200)
+  assert.deepEqual(sent.body.entry, { id: 'm0001', date: '2026-10-27', slot: 'd', mealId: 'meal-1', text: '꿔바로우 반 접시, 3명이서', hasPhoto: true, status: 'pending', created: sent.body.entry.created, result: null, doneAt: null })
+  assert.equal((await call('GET', '/api/account/claude-token', { cookie })).body.pending, 1)
+
+  // Claude: no token, a session cookie, or a made-up token are all refused.
+  assert.equal((await call('GET', '/api/claude/inbox')).status, 401)
+  assert.equal((await call('GET', '/api/claude/inbox', { cookie })).status, 401)
+  assert.equal((await call('GET', '/api/claude/inbox', { headers: { authorization: 'Bearer gplanc_nope' } })).status, 401)
+  const inbox = (await call('GET', '/api/claude/inbox', { headers: claude })).body.entries
+  assert.deepEqual(inbox.map(e => [e.id, e.text, e.photo === PHOTO, e.estimate.kcal]), [['m0001', '꿔바로우 반 접시, 3명이서', true, 400]])
+  assert.ok((await call('GET', '/api/account/claude-token', { cookie })).body.used)
+
+  // The answer: totals added up from the items; the photo is dropped.
+  assert.equal((await call('POST', '/api/claude/result', { headers: claude, body: { id: 'm0001', items: [{ name: '꿔바로우' }] } })).status, 400)
+  assert.equal((await call('POST', '/api/claude/result', { headers: claude, body: { id: 'nope', items: [{ name: '꿔바로우', kcal: 1 }] } })).status, 404)
+  const done = await call('POST', '/api/claude/result', { headers: claude, body: { id: 'm0001', note: 'a third of a plate for three', items: [
+    { name: '꿔바로우', amount: '1/6접시', kcal: 260, p: 9, c: 30, f: 11 },
+    { name: '흰쌀밥', amount: '1공기', kcal: 310, p: 6, c: 68, f: 1 },
+  ] } })
+  assert.equal(done.status, 200)
+  const back = (await call('GET', '/api/inbox', { cookie })).body.entries
+  assert.equal(back[0].status, 'done')
+  assert.deepEqual(back[0].result, { items: [
+    { name: '꿔바로우', amount: '1/6접시', kcal: 260, p: 9, c: 30, f: 11 },
+    { name: '흰쌀밥', amount: '1공기', kcal: 310, p: 6, c: 68, f: 1 },
+  ], kcal: 570, p: 15, c: 98, f: 12, note: 'a third of a plate for three', by: 'claude' })
+  assert.equal(back[0].hasPhoto, false)
+  assert.deepEqual((await call('GET', '/api/claude/inbox', { headers: claude })).body.entries, [])
+
+  // Applied by the app, then acknowledged and gone.
+  assert.equal((await call('POST', '/api/inbox/ack', { cookie, body: { ids: ['m0001'] } })).body.removed, 1)
+  assert.deepEqual((await call('GET', '/api/inbox', { cookie })).body.entries, [])
 })
 
-test('meal photo: a Gemini key wins over Workers AI, keeps the key out of the URL, and errors map', async () => {
-  const sent = []
-  let answer = { candidates: [{ content: { parts: [{ text: 'thinking…', thought: true }, { text: '```json\n{"is_food": true, "items": [{"name": "닭가슴살", "servings": 2, "grams": 200, "kcal": 220, "protein_g": 46, "carbs_g": 2, "fat_g": 4}]}\n```' }] }, finishReason: 'STOP' }] }
-  let status = 200
-  const fetch = async (url, init) => { sent.push({ url: String(url), init }); return new Response(JSON.stringify(answer), { status }) }
-  const AI = { run: async () => { throw new Error('should not be used') } }
-  const { call, cookieFor, addUser } = setup({ GEMINI_API_KEY: 'AIza-test', AI }, { fetch })
+test('Claude inbox: the dataset of foods Claude worked out, and a new token ends the old one', async () => {
+  const { call, cookieFor, addUser } = setup()
   addUser()
   const cookie = cookieFor('u1')
-  const r = await call('POST', '/api/meal/photo', { cookie, body: { image: PHOTO } })
-  assert.equal(r.status, 200)
-  assert.deepEqual(r.body, { items: [{ name: '닭가슴살', servings: 2, grams: 200, kcal: 220, p: 46, c: 2, f: 4 }], provider: 'gemini', model: 'gemini-3.8-flash' })
-  assert.equal(sent[0].url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent')
-  assert.equal(sent[0].init.headers['x-goog-api-key'], 'AIza-test')
-  assert.equal(JSON.parse(sent[0].init.body).contents[0].parts[0].inlineData.mimeType, 'image/jpeg')
+  const first = (await call('POST', '/api/account/claude-token', { cookie })).body.token
+  const claude = tok => ({ authorization: 'Bearer ' + tok, 'sec-fetch-site': '' })
+  assert.equal((await call('POST', '/api/claude/foods', { headers: claude(first), body: { foods: [{ name: '꿔바로우', kcal: 520 }] } })).status, 400)
+  const put = await call('POST', '/api/claude/foods', { headers: claude(first), body: { foods: [
+    { name: '꿔바로우', g: 200, kcal: 520, p: 18, c: 60, f: 22, note: '1 plate for one' },
+    { name: '마라탕', g: 600, kcal: 650, p: 30, c: 55, f: 33 },
+  ] } })
+  assert.deepEqual(put.body, { ok: true, added: 2, count: 2 })
+  // A better answer for the same name replaces it.
+  await call('POST', '/api/claude/foods', { headers: claude(first), body: { foods: [{ name: '마 라 탕', g: 600, kcal: 700, p: 32, c: 60, f: 35 }] } })
+  const foods = (await call('GET', '/api/foods', { cookie })).body.foods
+  assert.deepEqual(foods.map(f => [f.name, f.kcal]), [['꿔바로우', 520], ['마 라 탕', 700]])
+  assert.equal((await call('GET', '/api/foods')).status, 401)
 
-  answer = { candidates: [{ content: { parts: [{ text: '{"is_food": false, "items": []}' }] } }] }
-  assert.equal((await call('POST', '/api/meal/photo', { cookie, body: { image: PHOTO } })).status, 422)
-  status = 429
-  answer = { error: { message: 'Resource has been exhausted' } }
-  assert.equal((await call('POST', '/api/meal/photo', { cookie, body: { image: PHOTO } })).status, 429)
-  status = 400
-  const bad = await call('POST', '/api/meal/photo', { cookie, body: { image: PHOTO } })
-  assert.equal(bad.status, 502)
-  assert.match(bad.body.error, /Gemini answered 400/)
+  const second = (await call('POST', '/api/account/claude-token', { cookie })).body.token
+  assert.equal((await call('GET', '/api/claude/foods', { headers: claude(first) })).status, 401)
+  assert.equal((await call('GET', '/api/claude/foods', { headers: claude(second) })).body.foods.length, 2)
+  assert.deepEqual((await call('DELETE', '/api/account/claude-token', { cookie })).body, { active: false })
+  assert.equal((await call('GET', '/api/claude/foods', { headers: claude(second) })).status, 401)
 })
 
-test('meal photo: thirty an hour per profile', async () => {
-  const AI = { run: async () => ({ response: { is_food: true, items: [{ name: '사과', servings: 1 }] } }) }
-  const { call, cookieFor, addUser } = setup({ AI })
-  addUser()
-  const cookie = cookieFor('u1')
-  for (let i = 0; i < 30; i++) assert.equal((await call('POST', '/api/meal/photo', { cookie, body: { image: PHOTO } })).status, 200)
-  const r = await call('POST', '/api/meal/photo', { cookie, body: { image: PHOTO } })
-  assert.equal(r.status, 429)
-  assert.ok(+r.headers.get('retry-after') > 0)
+test('Claude inbox: a full inbox says so, and one profile never sees another\'s', async () => {
+  const { call, cookieFor, addUser } = setup({ OPEN_SIGNUP: '1' })
+  addUser('u1', 'Chan')
+  addUser('u2', 'Friend')
+  const a = cookieFor('u1'), b = cookieFor('u2')
+  for (let i = 0; i < 30; i++) assert.equal((await call('POST', '/api/inbox', { cookie: a, body: { id: 'meal' + i, date: '2026-10-27', slot: 's', text: '간식 ' + i } })).status, 200)
+  assert.equal((await call('POST', '/api/inbox', { cookie: a, body: { id: 'meal99', date: '2026-10-27', slot: 's', text: 'one more' } })).status, 429)
+  assert.deepEqual((await call('GET', '/api/inbox', { cookie: b })).body.entries, [])
+  // The same id from another profile is another entry.
+  assert.equal((await call('POST', '/api/inbox', { cookie: b, body: { id: 'meal0', date: '2026-10-27', slot: 's', text: '사과' } })).status, 200)
+  assert.equal((await call('GET', '/api/inbox', { cookie: a })).body.entries[0].text, '간식 0')
+  const tokB = (await call('POST', '/api/account/claude-token', { cookie: b })).body.token
+  const seen = (await call('GET', '/api/claude/inbox', { headers: { authorization: 'Bearer ' + tokB } })).body.entries
+  assert.deepEqual(seen.map(e => e.text), ['사과'])
 })

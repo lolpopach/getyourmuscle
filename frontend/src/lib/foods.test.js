@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { FOODS, findFood, normName, scaled, sumNutrition } from './foods.js'
+import { FOODS, findFood, foodNames, normName, scaled, setMyFoods, sumNutrition } from './foods.js'
 
 describe('the food table', () => {
   it('has one row per spelling and numbers that add up', () => {
@@ -48,7 +48,7 @@ describe('finding a dish', () => {
     expect(findFood('가지볶음')).toMatchObject({ how: 'guess', food: { cat: 'side', name: '가지볶음' } })
     expect(findFood('고등어조림').food.cat).toBe('main')
     expect(findFood('소고기콩나물국').food.cat).toBe('soup')
-    expect(findFood('유린기').how).toBe('guess')
+    expect(findFood('훠궈').how).toBe('guess')
     expect(findFood('')).toBeNull()
   })
 })
@@ -60,5 +60,23 @@ describe('amounts', () => {
     expect(scaled(rice, -1)).toEqual({ kcal: 0, p: 0, c: 0, f: 0 })
     const chicken = findFood('닭가슴살').food
     expect(sumNutrition([scaled(rice, 1), scaled(chicken, 2)])).toEqual({ kcal: 530, p: 52, c: 70, f: 5 })
+  })
+})
+
+describe('the owner\'s own foods', () => {
+  it('are looked up before the table, by the same spelling rules, and can be replaced', () => {
+    setMyFoods([{ name: '꿔 바로우', g: 200, kcal: 520, p: 18, c: 60, f: 22 }, { name: '흰쌀밥', cat: 'rice', g: 200, kcal: 290, p: 5, c: 64, f: 1 }, { name: '', kcal: 5 }, { name: '빈 것', kcal: 0 }, { name: '무쌈', cat: 'pickle', g: 30, kcal: 10 }])
+    try {
+      expect(findFood('꿔바로우')).toMatchObject({ how: 'mine', food: { name: '꿔 바로우', cat: 'main', g: 200, kcal: 520 } })
+      // The owner's own bowl of rice wins over the table's, and is still a bowl of rice.
+      expect(findFood('흰쌀밥')).toMatchObject({ how: 'mine', food: { cat: 'rice', kcal: 290 } })
+      // A category the table does not have is a main dish.
+      expect(findFood('무쌈').food.cat).toBe('main')
+      expect(findFood('빈것').how).toBe('guess')
+      expect(foodNames()).toContain('꿔 바로우')
+    } finally {
+      setMyFoods([])
+    }
+    expect(findFood('흰쌀밥').how).toBe('exact')
   })
 })

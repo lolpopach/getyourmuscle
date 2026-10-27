@@ -71,14 +71,17 @@ export function splitDishes(line) {
 }
 
 /**
- * One month's page → { month: 'YYYY-MM' | null, days }. A day with no meal (weekends, holidays)
- * is left out. Anything the page does not say is not invented: no caption, no month.
+ * One month's page → { month: 'YYYY-MM' | null, days, photos }. A day with no meal (weekends,
+ * holidays) is left out. `photos` holds the picture of the day's tray where the school posted one
+ * (an absolute URL) — what the scheduled Claude session looks at to judge real portions. Anything
+ * the page does not say is not invented: no caption, no month.
  */
-export function parseMenuPage(html) {
+export function parseMenuPage(html, base = DEFAULT_LUNCH_URL) {
   const cap = /<caption>\s*(\d{4})\s*년\s*(\d{1,2})\s*월/.exec(html);
-  if (!cap) return { month: null, days: {} };
+  if (!cap) return { month: null, days: {}, photos: {} };
   const month = `${cap[1]}-${String(cap[2]).padStart(2, '0')}`;
   const days = {};
+  const photos = {};
   for (const row of html.split(/<tr\b/i).slice(1)) {
     const d = />\s*(\d{1,2})\s*일\s*\(/.exec(row);
     if (!d || +d[1] < 1 || +d[1] > 31) continue;
@@ -87,9 +90,12 @@ export function parseMenuPage(html) {
       const dishes = splitDishes(text(m[2]));
       if (dishes.length) meals.push({ label: text(m[1]).slice(0, 10) || '중식', dishes });
     }
-    if (meals.length) days[`${month}-${String(d[1]).padStart(2, '0')}`] = meals;
+    const date = `${month}-${String(d[1]).padStart(2, '0')}`;
+    if (meals.length) days[date] = meals;
+    const img = /<img[^>]+src=["']([^"']+)["'][^>]*class=["']?calendar_img/i.exec(row) || /<img[^>]+class=["']?calendar_img["']?[^>]*src=["']([^"']+)["']/i.exec(row);
+    if (img && meals.length) { try { photos[date] = new URL(img[1], base).href; } catch { /* a src that is not a URL */ } }
   }
-  return { month, days };
+  return { month, days, photos };
 }
 
 /**
@@ -104,9 +110,9 @@ export async function fetchMonth(base, month, { fetch: fetchImpl = globalThis.fe
     if (!res.ok) return { error: `the school site answered ${res.status}` };
     const bytes = new Uint8Array(await res.arrayBuffer());
     if (bytes.length > MAX_PAGE) return { error: 'the school page is too large' };
-    const doc = parseMenuPage(decodePage(bytes, res.headers.get('content-type') || ''));
+    const doc = parseMenuPage(decodePage(bytes, res.headers.get('content-type') || ''), base);
     if (doc.month && doc.month !== month) return { error: 'the school page showed another month' };
-    return { month, days: doc.days, at: now };
+    return { month, days: doc.days, photos: doc.photos, at: now };
   } catch (e) {
     return { error: e.name === 'AbortError' ? 'the school site did not answer in time' : 'the school site could not be reached' };
   } finally {
@@ -130,5 +136,5 @@ export async function lunchFor(date, cached, fetchMonthFn, now = Date.now()) {
     if (!fresh.error) { doc = fresh; store = fresh; }
     else if (!doc) return { error: fresh.error };
   }
-  return { body: { date, meals: doc.days[date] || [], fetchedAt: doc.at || null }, store };
+  return { body: { date, meals: doc.days[date] || [], photo: doc.photos?.[date] || null, fetchedAt: doc.at || null }, store };
 }

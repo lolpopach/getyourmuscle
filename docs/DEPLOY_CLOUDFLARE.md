@@ -22,26 +22,19 @@ the app already leaves out on any server that does not offer it.
   the app is served on. `RP_ID` / `ORIGIN` variables override them.
 - `DEFAULT_LANG` (default `ko`).
 
-## G-PLAN: school lunch and meal photos
+## G-PLAN: school lunch, and Claude working out meals
 
 - **School lunch.** The lunch sheet reads the day's menu off the school's homepage
   (`api/school-lunch.js`; by default `http://kshcm.net/?menu_no=34`, the 식단표 board) and
   shows how to eat it. The Worker keeps each month for six hours, and an older copy while the
   school's site is down. `LUNCH_URL` points it at another withschool.co.kr school's 식단표
   page; `LUNCH_URL` set to an empty value turns the card off.
-- **Meal photos, free.** The `AI` binding in `wrangler.jsonc` reads photos with Workers AI
-  (`@cf/google/gemma-4-26b-a4b-it`) inside the Workers Free plan's daily allowance of 10,000
-  Neurons — a photo costs a few dozen, so well over a hundred photos a day. Nothing to set up.
-  Past the allowance a photo answers "used up for now" until 00:00 UTC; the Free plan never
-  bills for it.
-- **More accurate photos, also free:** create a key at Google AI Studio and add it to the Worker
-  as the **secret** `GEMINI_API_KEY` (Settings → Variables and Secrets → Add → Secret). Photos
-  then go to Gemini (`gemini-3.8-flash`; `GEMINI_MODEL` picks another), which reads Korean food
-  better. On Gemini's free tier Google may use what is sent to improve its products.
-- Either way the model only names the dishes and their amounts; the calories come from the
-  app's own food table (`frontend/src/lib/foods.js`), so a model's guess at calories never
-  reaches the log for a dish the table knows. `WORKERS_AI_MODEL` picks another Workers AI
-  vision model.
+- **Meals Claude works out.** A meal is counted from the app's food table the moment it is
+  written. What the table cannot settle, and any photo, waits in an inbox in the Worker's
+  storage for a Claude Code session scheduled on the owner's Claude account, which answers with
+  the numbers and grows a dataset of foods. No AI binding, no API key, nothing billed: the
+  owner issues a token in Settings → *Claude works out meals* and adds it to the Claude
+  environment as `GPLAN_CLAUDE_TOKEN`. The whole procedure: [docs/dev/CLAUDE_MEALS.md](dev/CLAUDE_MEALS.md).
 
 ## Deploy on every push (Cloudflare Git builds)
 
@@ -59,13 +52,9 @@ Shortcut cannot post Apple Health data and the installed app is sent to a login 
 
 ```bash
 cd frontend && npm ci && npm run build:cloudflare && cd ..
-npx wrangler dev --local    # app and API on http://localhost:8787
+npx wrangler dev            # app and API on http://localhost:8787
 cd cloudflare && npm test   # the API on node:sqlite
 ```
-
-`--local` runs without a Cloudflare sign-in. Workers AI only runs on Cloudflare, so a photo
-answers "could not be read" there; with `npx wrangler login` first, plain `npx wrangler dev`
-reaches the real Workers AI (and spends the same daily allowance).
 
 ---
 

@@ -1,51 +1,107 @@
-// G-PLAN's food helpers inside the meal sheet (docs/dev/GETYOURMUSCLE_PLAN.md §4.6): the
-// calculator — photos read by the server's free vision model, or dishes typed by name, at a
-// table of one or a shared one — and the school lunch with how to eat it, the owner's dislikes
-// left out. The numbers are lib/foods.js,
-// lib/food-calc.js and lib/lunch.js; this file only lays them out.
-import { useEffect, useMemo, useRef, useState } from 'react'
+// G-PLAN's food helpers inside the meal sheet (docs/dev/GETYOURMUSCLE_PLAN.md §4.6): the entry
+// that counts what the owner writes and saves it at once — sending what the food table cannot
+// settle, and any photo, to Claude (docs/dev/CLAUDE_MEALS.md) — the calculator for a shared table
+// or counting by the piece, and the school lunch with how to eat it, the owner's dislikes left
+// out. The numbers are lib/foods.js, food-text.js, food-calc.js, inbox.js and lunch.js; this file
+// lays them out and does the requests.
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
 import { t, dateLocale } from '../lib/i18n.js'
 import { api } from '../lib/api.js'
-import { fmtDate } from '../lib/format.js'
-import { foodNames } from '../lib/foods.js'
-import { calcRow, rowsFromPhoto, renameRow, rowFood, rowNutrition, countInPieces, setPieces, calcTotals, calcMealItem, MAX_SERVINGS, MAX_PIECES } from '../lib/food-calc.js'
+import { fmtDate, uid } from '../lib/format.js'
+import { foodNames, setMyFoods } from '../lib/foods.js'
+import { calcRow, renameRow, rowFood, rowNutrition, rowServings, rowKnown, countInPieces, setPieces, calcTotals, calcMealItem, MAX_SERVINGS, MAX_PIECES } from '../lib/food-calc.js'
+import { rowsFromText } from '../lib/food-text.js'
+import { applyInboxResults, needsClaude } from '../lib/inbox.js'
 import { parseMenu, planLunch, lunchTarget, lunchMealItem, setDislike, isDisliked, fmtServings } from '../lib/lunch.js'
 import { addMeal, saveTemplate } from '../lib/gplan-day.js'
 import Icon from './Icon.jsx'
-import { Button, TextField, Switch, Stepper } from './ui.jsx'
+import { Button, TextField, Switch, Stepper, NumberField } from './ui.jsx'
 
 const ui = () => useUI.getState()
 const update = (...a) => useStore.getState().update(...a)
 const n0 = v => Math.round(Number(v) || 0).toLocaleString(dateLocale())
 
-/** What the server offers a signed-in owner (GET /api/config): photos read, the school menu. */
+/* ------------------------------------------------- the owner's foods, worked out by Claude --- */
+
+// GET /api/foods, kept in this browser too, so a name Claude worked out counts offline as well.
+const FOODS_KEY = 'gplan_my_foods'
+const foodsListeners = new Set()
+let foodsVersion = 0
+function loadMyFoods(list) {
+  setMyFoods(list)
+  foodsVersion++
+  for (const l of foodsListeners) l()
+}
+try { loadMyFoods(JSON.parse(localStorage.getItem(FOODS_KEY) || '[]')) } catch { /* no storage: the server's copy comes with the next sync */ }
+const useFoodsVersion = () => useSyncExternalStore(l => { foodsListeners.add(l); return () => foodsListeners.delete(l) }, () => foodsVersion)
+
+/** What the server offers a signed-in owner (GET /api/config): the school menu, and Claude linked. */
 export function useFoodFeatures() {
   const user = useStore(s => s.user)
   const config = useStore(s => s.config)
-  return { photo: !!user && config?.meal_photo === true, lunch: !!user && config?.lunch === true }
+  return { lunch: !!user && config?.lunch === true, claude: !!user && config?.claude?.linked === true }
 }
-
-/* ------------------------------------------------------------------- entry buttons ------ */
 
 /**
- * "Photo" and "By food name" above the meal sheet's templates. The photo button is a <label>
- * around the file input, so the tap that opens the camera is the user's own — a script's
- * input.click() from inside a sheet is refused on iOS.
+ * Claude's answers into the log and the owner's foods into the lookup: when the app opens, when
+ * it comes back to the front, and every ten minutes while it is open.
  */
-export function FoodEntryButtons({ iso, slot, photo }) {
-  return <div style={{ display: 'grid', gridTemplateColumns: photo ? '1fr 1fr' : '1fr', gap: 8, marginBottom: 14 }}>
-    {photo && <PhotoPicker label={t('Photo')} className="btn tinted sm" style={{ width: '100%' }} onFile={f => foodCalcSheet(iso, slot, f)} />}
-    <Button size="sm" variant="tinted" icon="list" style={{ width: '100%' }} onClick={() => foodCalcSheet(iso, slot)}>{t('By food name')}</Button>
-  </div>
+export function useClaudeSync() {
+  const { claude } = useFoodFeatures()
+  useEffect(() => {
+    if (!claude) return
+    let live = true
+    const run = async () => {
+      try {
+        const [inbox, foods] = await Promise.all([api('/api/inbox'), api('/api/foods')])
+        if (!live) return
+        const list = Array.isArray(foods?.foods) ? foods.foods : []
+        loadMyFoods(list)
+        try { localStorage.setItem(FOODS_KEY, JSON.stringify(list)) } catch { /* full or blocked */ }
+        const answered = (Array.isArray(inbox?.entries) ? inbox.entries : []).filter(e => e.status === 'done')
+        if (!answered.length) return
+        let ids = []
+        update(st => { ids = applyInboxResults(st, answered) })
+        if (ids.length) await api('/api/inbox/ack', { method: 'POST', body: JSON.stringify({ ids }) })
+      } catch { /* offline or signed out: the next run catches up */ }
+    }
+    run()
+    const onShow = () => { if (document.visibilityState === 'visible') run() }
+    document.addEventListener('visibilitychange', onShow)
+    const timer = setInterval(run, 10 * 60000)
+    return () => { live = false; document.removeEventListener('visibilitychange', onShow); clearInterval(timer) }
+  }, [claude])
 }
 
-/* ------------------------------------------------------------------------ calculator --- */
+/**
+ * Logs a meal now, with the food table's numbers; when `toClaude`, also sends it to Claude's inbox
+ * and marks it pending until the answer replaces the numbers (useClaudeSync). Not sent (offline),
+ * it stays as counted. Resolves to whether it went to Claude.
+ */
+async function logMeal({ iso, slot, item, text, photo, toClaude, asTemplate }) {
+  const id = toClaude ? 'm' + uid() : null
+  let stored = null
+  update(st => {
+    stored = addMeal(st, iso, slot, { ...item, ...(id ? { pending: id } : {}) })
+    if (asTemplate && !id) saveTemplate(st, slot, item)
+  })
+  if (!id) return false
+  try {
+    await api('/api/inbox', { method: 'POST', timeout: 60000, body: JSON.stringify({ id, date: iso, slot, mealId: stored.id, text, photo, estimate: { kcal: item.kcal, p: item.p, c: item.c, f: item.f } }) })
+    return true
+  } catch {
+    update(st => {
+      const m = (st.gday?.[iso]?.meals?.[slot] || []).find(x => x.id === stored.id)
+      if (m) { delete m.pending; st.gday[iso]._ts = Date.now() }
+    })
+    ui().toast(t('Could not send it to Claude — saved with the food table’s numbers.'))
+    return false
+  }
+}
 
-export const foodCalcSheet = (iso, slot, file = null) => ui().openSheet(close => <FoodCalcSheet iso={iso} slot={slot} file={file} close={close} />)
-
-// A phone photo is several MB; the model reads a 1024 px JPEG just as well, and it travels in a
+// A phone photo is several MB; Claude reads a 1024 px JPEG just as well, and it travels in a
 // fraction of the time. Browsers apply the camera's rotation before drawing.
 export function shrinkPhoto(file, max = 1024, quality = 0.82) {
   return new Promise((resolve, reject) => {
@@ -66,16 +122,6 @@ export function shrinkPhoto(file, max = 1024, quality = 0.82) {
   })
 }
 
-function photoError(e) {
-  if (e?.status === 422) return t('No food found in this photo — try another one, or add the dishes by name.')
-  if (e?.status === 429) return t('Photo reading is used up for now — add the dishes by name, or try again later.')
-  if (e?.status === 404 || e?.status === 503) return t('Photo reading is not set up on this server.')
-  return t('The photo could not be read — try again, or add the dishes by name.')
-}
-
-// How a countable dish is counted, in the language of the moment.
-const PIECE_UNIT = { slice: () => t('slices'), piece: () => t('pieces'), each: () => t('pcs') }
-
 // A label whose file input opens the camera or the library: the tap is the user's own (iOS
 // refuses a script's input.click() from inside a sheet).
 function PhotoPicker({ label, className, style, onFile }) {
@@ -87,55 +133,113 @@ function PhotoPicker({ label, className, style, onFile }) {
   </label>
 }
 
-let photoSeq = 0
+// How a countable dish is counted, in the language of the moment.
+const PIECE_UNIT = { slice: () => t('slices'), piece: () => t('pieces'), each: () => t('pcs') }
+
+/** A row's amount as written for a person: "1/2공기", "9점", "1 1/2인분". */
+function amountLabel(row) {
+  const r = rowFood(row)
+  if (row.pieces != null && r?.food.piece) return `${row.pieces}${PIECE_UNIT[r.food.piece.kind]()}`
+  return `${fmtServings(row.servings)}${r?.food.cat === 'rice' ? t('bowl') : t('serving')}`
+}
+
+/* ---------------------------------------------------------------------- write it down --- */
 
 /**
- * The calculator: rows of dishes and amounts, from photos (any number — a plate that came later
- * is one more photo) or typed by name. At a shared table the shared dishes count the owner's
- * share only; a dish counted by the piece is what the owner ate.
+ * The meal sheet's entry: what was eaten, written the way one would say it ("제육덮밥, 계란후라이
+ * 2개, 밥 반 공기"), counted from the food table as it is typed and saved with one tap. With Claude
+ * linked, a dish the table cannot settle — or a photo — goes to Claude as well, and its answer
+ * replaces the table's numbers when it comes back.
  */
-function FoodCalcSheet({ iso, slot, file, close }) {
-  const features = useFoodFeatures()
-  const [rows, setRows] = useState(() => (file ? [] : [calcRow('', 1)]))
-  const [photos, setPhotos] = useState([])   // [{ id, preview, data, phase: 'reading'|'done'|'error', error }]
-  const [note, setNote] = useState('')
+export function SmartEntry({ iso, slot }) {
+  const { claude } = useFoodFeatures()
+  const version = useFoodsVersion()
+  const [text, setText] = useState('')
+  const [photo, setPhoto] = useState(null)
+  const [manual, setManual] = useState(null)
+  const [asTemplate, setAsTemplate] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const rows = useMemo(() => rowsFromText(text), [text, version])
+  const totals = calcTotals(rows)
+  const manualOn = !!manual && ((manual.kcal || 0) > 0 || (manual.p || 0) > 0)
+  const toClaude = claude && !manualOn && (rows.length > 0 || !!photo) && needsClaude(rows, photo)
+  const canSave = !busy && (manualOn || rows.length > 0 || !!photo)
+  const setNum = k => v => setManual(m => ({ ...m, [k]: v }))
+
+  const save = async () => {
+    const name = text.trim().slice(0, 60) || (photo ? t('Meal photo') : t('Quick entry'))
+    const item = manualOn ? { name, kcal: manual.kcal || 0, p: manual.p || 0, c: manual.c || 0, f: manual.f || 0 } : { name, ...totals }
+    setBusy(true)
+    const sent = await logMeal({ iso, slot, item, text: text.trim(), photo, toClaude, asTemplate })
+    setBusy(false)
+    setText(''); setPhoto(null); setManual(null); setAsTemplate(false)
+    if (sent) ui().toast(t('Saved — Claude will work it out'))
+  }
+  const pickPhoto = f => shrinkPhoto(f).then(setPhoto).catch(() => ui().toast(t('This photo could not be opened.')))
+
+  return <div className="smart-entry">
+    <b className="small" style={{ display: 'block', margin: '14px 0 6px' }}>{t('Write what you ate')}</b>
+    <TextField value={text} onChange={e => setText(e.target.value)} maxLength={300} placeholder={t('e.g. 제육덮밥, 계란후라이 2개, 밥 반 공기')} aria-label={t('Write what you ate')} />
+    {photo && <div className="row" style={{ gap: 10, alignItems: 'center', marginTop: 8 }}>
+      <img src={photo} alt="" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 12, flex: 'none' }} />
+      <span className="small muted" style={{ flex: 1 }}>{t('Claude will look at this photo.')}</span>
+      <button className="iconbtn" style={{ width: 32, height: 30, borderRadius: 8, fontSize: 15, color: 'var(--red)' }} onClick={() => setPhoto(null)} aria-label={t('Delete')}><Icon name="trash" /></button>
+    </div>}
+    <div className="row" style={{ gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+      {claude && <PhotoPicker label={t('Add a photo')} className="btn ghost sm" onFile={pickPhoto} />}
+      <Button size="sm" variant="ghost" icon="list" style={{ width: 'auto' }} onClick={() => foodCalcSheet(iso, slot, text)}>{t('Shared table · by the piece')}</Button>
+    </div>
+
+    {!manualOn && rows.length > 0 && <div style={{ marginTop: 6 }}>
+      {rows.map(r => {
+        const known = rowKnown(r)
+        const n = rowNutrition(r)
+        return <div key={r.id} className="row between small" style={{ gap: 8, padding: '3px 0' }}>
+          <span style={{ minWidth: 0 }}>{r.name} · {amountLabel(r)}</span>
+          <span style={{ whiteSpace: 'nowrap', color: known ? undefined : 'var(--orange)' }}>
+            {n0(n.kcal)} kcal{!known && ' · ' + (toClaude ? t('Claude will check') : t('rough estimate'))}
+          </span>
+        </div>
+      })}
+      <div className="row between small" style={{ marginTop: 4 }}>
+        <b>{t('Total')}</b><b>{t('{0} kcal · protein {1} g', n0(totals.kcal), n0(totals.p))}</b>
+      </div>
+    </div>}
+    {toClaude && <div className="dim small" style={{ marginTop: 4 }}>{t('Saved now with the food table’s numbers; Claude works it out and replaces them.')}</div>}
+
+    <Button size="sm" variant="ghost" style={{ width: 'auto', marginTop: 4 }} trailingIcon={manual ? 'chevronUp' : 'chevronDown'}
+      onClick={() => setManual(m => (m ? null : { kcal: null, p: null, c: null, f: null }))}>{t('Enter numbers yourself')}</Button>
+    {manual && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, marginTop: 4 }}>
+      {[['kcal', 'kcal'], ['p', t('Protein')], ['c', t('Carbs')], ['f', t('Fat')]].map(([k, label]) => <label key={k} className="small muted" style={{ display: 'grid', gap: 4 }}>
+        {label}<NumberField value={manual[k]} onChange={setNum(k)} nullable decimal={false} className="field" />
+      </label>)}
+    </div>}
+    {!toClaude && <div className="row between" style={{ margin: '10px 0' }}>
+      <span className="small">{t('Save as a template')}</span>
+      <Switch checked={asTemplate} onChange={setAsTemplate} aria-label={t('Save as a template')} />
+    </div>}
+    <Button variant="primary" icon="plus" style={{ marginTop: toClaude ? 10 : 0 }} disabled={!canSave} onClick={save}>
+      {toClaude ? t('Save and send to Claude') : t('Add')}
+    </Button>
+  </div>
+}
+
+/* ------------------------------------------------------------------------ calculator --- */
+
+export const foodCalcSheet = (iso, slot, text = '') => ui().openSheet(close => <FoodCalcSheet iso={iso} slot={slot} text={text} close={close} />)
+
+/**
+ * The calculator: rows of dishes and amounts, typed by name or carried over from what was
+ * written. At a shared table the shared dishes count the owner's share only; a dish counted by
+ * the piece is what the owner ate. A dish the table cannot settle goes to Claude like any entry.
+ */
+function FoodCalcSheet({ iso, slot, text, close }) {
+  const { claude } = useFoodFeatures()
+  useFoodsVersion()
+  const [rows, setRows] = useState(() => { const r = rowsFromText(text); return r.length ? r : [calcRow('', 1)] })
   const [share, setShare] = useState({ on: false, people: 2, pct: 50 })
   const [asTemplate, setAsTemplate] = useState(false)
-  const live = useRef(true)
-  const started = useRef(false)
-  const sharing = useRef(share.on)
-  sharing.current = share.on
   const names = useMemo(() => foodNames(), [])
-  useEffect(() => { live.current = true; return () => { live.current = false } }, [])
-
-  const patchPhoto = (id, patch) => setPhotos(ps => ps.map(p => (p.id === id ? { ...p, ...patch } : p)))
-  // One photo read (again): its dishes replace the ones it gave before; every other row stays.
-  const readPhoto = async (id, data, noteNow) => {
-    patchPhoto(id, { phase: 'reading', error: null })
-    const shared = sharing.current
-    try {
-      const r = await api('/api/meal/photo', { method: 'POST', body: JSON.stringify({ image: data, note: noteNow, shared }), timeout: 70000 })
-      if (!live.current) return
-      setRows(rs => [...rs.filter(x => x.src !== id && (x.src || x.name.trim())), ...rowsFromPhoto(r.items, { src: id, shared })])
-      patchPhoto(id, { phase: 'done' })
-    } catch (e) {
-      if (live.current) patchPhoto(id, { phase: 'error', error: photoError(e) })
-    }
-  }
-  const addPhoto = f => {
-    const id = 'p' + ++photoSeq
-    setPhotos(ps => [...ps, { id, preview: null, data: null, phase: 'reading', error: null }])
-    shrinkPhoto(f).then(data => {
-      if (!live.current) return
-      patchPhoto(id, { preview: data, data })
-      readPhoto(id, data, note)
-    }).catch(() => { if (live.current) patchPhoto(id, { phase: 'error', error: t('This photo could not be opened.') }) })
-  }
-  useEffect(() => {
-    if (!file || started.current) return
-    started.current = true
-    addPhoto(file)
-  }, [file])
 
   const pct = Math.min(100, Math.max(1, Math.round(Number(share.pct) || 1)))
   const frac = share.on ? pct / 100 : 1
@@ -148,30 +252,21 @@ function FoodCalcSheet({ iso, slot, file, close }) {
 
   const setRow = (id, f) => setRows(rs => rs.map(r => (r.id === id ? f(r) : r)))
   const totals = calcTotals(rows, frac)
-  const reading = photos.some(p => p.phase === 'reading')
-  const add = () => {
+  const named = rows.filter(r => r.name.trim() && rowServings(r) > 0)
+  const toClaude = claude && named.some(r => !rowKnown(r))
+  const add = async () => {
     const item = calcMealItem(rows, t('Meal'), { share: frac, sharedName: (n, p) => t('{0} (shared, {1}%)', n, p) })
-    update(st => {
-      addMeal(st, iso, slot, item)
-      if (asTemplate) saveTemplate(st, slot, item)
-    })
+    // What Claude reads: each dish with its amount, and the table it was shared at.
+    const said = named.map(r => `${r.name} ${amountLabel(r)}${share.on && r.shared && r.pieces == null ? ' (' + t('Shared') + ')' : ''}`).join(', ') +
+      (share.on ? ' — ' + t('{0} people at the table, my share {1}%', share.people, pct) : '')
     close()
+    const sent = await logMeal({ iso, slot, item, text: said, photo: null, toClaude, asTemplate })
+    if (sent) ui().toast(t('Saved — Claude will work it out'))
   }
 
   return <>
-    <h3 style={{ marginBottom: 2 }}>{file || photos.length ? t('Meal photo') : t('Food calculator')}</h3>
+    <h3 style={{ marginBottom: 2 }}>{t('Food calculator')}</h3>
     <div className="muted small" style={{ marginBottom: 12 }}>{fmtDate(iso, true)}</div>
-
-    {photos.map(p => <div key={p.id} className="row" style={{ gap: 12, alignItems: 'center', marginBottom: 10 }}>
-      {p.preview ? <img src={p.preview} alt="" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 12, flex: 'none' }} />
-        : <div style={{ width: 56, height: 56, borderRadius: 12, background: 'var(--surface-2)', flex: 'none' }} />}
-      <div className="small" style={{ flex: 1, minWidth: 0, color: p.phase === 'error' ? 'var(--orange)' : undefined }}>
-        {p.phase === 'reading' ? t('Reading the photo… about 10 seconds.') : p.phase === 'error' ? p.error : t('Check the dishes and amounts — the calories follow.')}
-      </div>
-      {p.phase !== 'reading' && p.data && <Button size="sm" variant="tinted" onClick={() => readPhoto(p.id, p.data, note)}>{t('Read again')}</Button>}
-    </div>)}
-    {photos.length > 0 && <TextField value={note} onChange={e => setNote(e.target.value)} maxLength={200} style={{ marginBottom: 12 }}
-      placeholder={t('What the photo does not show, e.g. ate half the rice')} />}
 
     <div style={{ background: 'var(--surface-2)', borderRadius: 14, padding: '10px 12px', marginBottom: 6 }}>
       <div className="row between">
@@ -184,42 +279,42 @@ function FoodCalcSheet({ iso, slot, file, close }) {
           <Stepper label={t('My share')} value={share.pct} step={5} min={5} max={100} decimal={false} unit="%" onChange={v => setShare(s => ({ ...s, pct: v }))} />
         </div>
         <div className="dim small" style={{ marginTop: 8 }}>
-          {t('Shared dishes count as {0}% of what was served. Tap “Shared” on a dish that was only yours. Another plate came? Raise its amount, or add a photo of it.', pct)}
+          {t('Shared dishes count as {0}% of what was served. Tap “Shared” on a dish that was only yours. Another plate came? Raise its amount.', pct)}
         </div>
       </>}
     </div>
 
     <datalist id="gplan-foods">{names.map(n => <option key={n} value={n} />)}</datalist>
-    {rows.map(r => <FoodRow key={r.id} row={r} share={{ on: share.on, frac, pct }} onChange={f => setRow(r.id, f)}
+    {rows.map(r => <FoodRow key={r.id} row={r} claude={claude} share={{ on: share.on, frac, pct }} onChange={f => setRow(r.id, f)}
       onRemove={() => setRows(rs => rs.filter(x => x.id !== r.id))} />)}
-    <div className="row" style={{ gap: 8, marginTop: 6 }}>
-      <Button size="sm" variant="ghost" icon="plus" style={{ width: 'auto' }} onClick={() => setRows(rs => [...rs, calcRow('', 1, null, { shared: share.on })])}>{t('Add a dish')}</Button>
-      {features.photo && <PhotoPicker label={t('Add a photo')} className="btn ghost sm" onFile={addPhoto} />}
-    </div>
+    <Button size="sm" variant="ghost" icon="plus" style={{ width: 'auto', marginTop: 6 }} onClick={() => setRows(rs => [...rs, calcRow('', 1, { shared: share.on })])}>{t('Add a dish')}</Button>
 
     <div className="row between" style={{ margin: '12px 0 4px' }}>
       <b>{t('Total')}</b>
       <b>{t('{0} kcal · protein {1} g', n0(totals.kcal), n0(totals.p))}</b>
     </div>
-    <div className="dim small" style={{ marginBottom: 10 }}>{t('Calories come from G-PLAN’s food table. A dish it does not have is marked as an estimate — correct its name if you can.')}</div>
-    <div className="row between" style={{ margin: '6px 0 10px' }}>
+    <div className="dim small" style={{ marginBottom: 10 }}>
+      {toClaude ? t('Saved now with the food table’s numbers; Claude works it out and replaces them.') : t('Calories come from G-PLAN’s food table. A dish it does not have is marked as an estimate — correct its name if you can.')}
+    </div>
+    {!toClaude && <div className="row between" style={{ margin: '6px 0 10px' }}>
       <span className="small">{t('Save as a template')}</span>
       <Switch checked={asTemplate} onChange={setAsTemplate} aria-label={t('Save as a template')} />
-    </div>
-    <Button variant="primary" icon="plus" disabled={reading || totals.kcal <= 0} onClick={add}>{t('Add')}</Button>
+    </div>}
+    <Button variant="primary" icon="plus" disabled={totals.kcal <= 0 && !toClaude} onClick={add}>{toClaude ? t('Save and send to Claude') : t('Add')}</Button>
     <div style={{ height: 8 }} />
     <Button variant="ghost" onClick={close}>{t('Cancel')}</Button>
   </>
 }
 
-function FoodRow({ row, share, onChange, onRemove }) {
+function FoodRow({ row, claude, share, onChange, onRemove }) {
   const r = rowFood(row)
   const piece = r?.food.piece || null
   const byPiece = row.pieces != null && !!piece
   const shared = share.on && row.shared && !byPiece
   const n = rowNutrition(row, share.frac)
   const servingUnit = r?.food.cat === 'rice' ? t('bowl') : t('serving')
-  const badge = !r || r.how === 'exact' ? '' : r.how === 'similar' ? t('counted as {0}', r.food.name) : r.how === 'ai' ? t('AI estimate') : t('rough estimate')
+  const badge = !r || r.how === 'exact' ? '' : r.how === 'mine' ? t('worked out by Claude') : r.how === 'similar' ? t('counted as {0}', r.food.name)
+    : claude ? t('Claude will check') : t('rough estimate')
   const chip = on => 'chip nocap' + (on ? ' on' : '')
   return <div className="food-row" style={{ padding: '10px 0', borderBottom: '0.5px solid var(--sep)' }}>
     <div className="row" style={{ gap: 8 }}>
@@ -237,7 +332,7 @@ function FoodRow({ row, share, onChange, onRemove }) {
       <div className="small" style={{ flex: 1, minWidth: 0, textAlign: 'right' }}>
         <b>{n0(n.kcal)} kcal</b> · {t('protein {0} g', n0(n.p))}
         {shared && <div className="dim">{t('your {0}%', share.pct)}</div>}
-        {badge && <div className="dim" style={{ color: r.how === 'similar' ? undefined : 'var(--orange)' }}>{badge}</div>}
+        {badge && <div className="dim" style={{ color: r.how === 'similar' || r.how === 'mine' ? undefined : 'var(--orange)' }}>{badge}</div>}
       </div>
     </div>
     {(piece || share.on) && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>

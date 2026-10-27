@@ -46,6 +46,7 @@ Design notes for specific features, kept next to the code they describe:
 | [Set types](dev/SET_TYPES.md) | Drop sets and rest-pause: the set-row model and how totals are counted |
 | [Workout views](dev/LIST_VIEW.md) | The cards, list and compact layouts of the workout screen |
 | [Combine routines](dev/COMBINE_ROUTINES.md) | Spec for running more than one routine in a session |
+| [Claude works out meals](dev/CLAUDE_MEALS.md) | G-PLAN's meal inbox and the scheduled Claude session that answers it |
 
 ## Still stuck?
 

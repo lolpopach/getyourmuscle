@@ -1,10 +1,6 @@
-// The meal sheet's calculator: dishes and how much of each — read off one or more photos, or typed
-// by name — with every number from the food table (foods.js). Pure; components/GplanFood.jsx lays
-// it out.
-//
-// A photo row also carries the model's own estimate for what it saw (`ai`). It is used for one
-// case only: a dish the table can only guess at. The moment the owner renames a row, the estimate
-// belonged to another dish and is dropped.
+// The meal sheet's calculator: dishes and how much of each, typed by name or read from what the
+// owner wrote (food-text.js), with every number from the food table (foods.js) and the foods
+// Claude worked out before. Pure; components/GplanFood.jsx lays it out.
 //
 // A shared table (§ 나눠 먹기): a row marked `shared` holds what was served for everyone, and only
 // the owner's share of it counts — the share a fraction given once for the meal. A row counted in
@@ -23,43 +19,26 @@ export const clampServings = v => {
 }
 const clampPieces = v => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(MAX_PIECES, Math.max(0, n)) : 1 }
 
-/**
- * A row: a dish name, its servings, and (from a photo) the model's numbers for that amount.
- * `extra` sets `shared` (part of a shared table) and `src` (the photo it came from).
- */
-export function calcRow(name = '', servings = 1, ai = null, extra = {}) {
-  const per = clampServings(ai?.servings ?? servings) || 1
-  return {
-    id: newId(),
-    name: String(name || '').slice(0, 40),
-    servings: clampServings(servings),
-    pieces: null,
-    shared: !!extra.shared,
-    src: extra.src ?? null,
-    ai: ai && Number(ai.kcal) > 0 ? { kcal: +ai.kcal / per, p: (+ai.p || 0) / per, c: (+ai.c || 0) / per, f: (+ai.f || 0) / per } : null,
-  }
+/** A row: a dish name and its servings; `extra.shared` makes it part of a shared table. */
+export function calcRow(name = '', servings = 1, extra = {}) {
+  return { id: newId(), name: String(name || '').slice(0, 40), servings: clampServings(servings), pieces: null, shared: !!extra.shared }
 }
 
-export const rowsFromPhoto = (items, extra = {}) => (Array.isArray(items) ? items : []).map(it => calcRow(it.name, it.servings, it, extra))
-
-/** A row renamed: the model's estimate was for the dish it saw, and pieces were of the old dish. */
+/** A row renamed: pieces were of the old dish, so the amount goes back to servings. */
 export const renameRow = (row, name) => {
-  const next = { ...row, name: String(name || '').slice(0, 40), ai: null, pieces: null }
+  const next = { ...row, name: String(name || '').slice(0, 40), pieces: null }
   if (row.pieces != null) next.servings = clampServings(rowServings(row))
   return next
 }
 
 /**
- * Where a row's numbers come from → { food, how } or null for an empty name. `how` is findFood's
- * ('exact', 'similar', 'guess'), or 'ai' when the table could only guess and the photo model
- * had numbers of its own.
+ * Where a row's numbers come from → { food, how } or null for an empty name: findFood's answer
+ * ('mine', 'exact', 'similar' or 'guess').
  */
-export function rowFood(row) {
-  const r = findFood(row?.name)
-  if (!r) return null
-  if (r.how === 'guess' && row.ai) return { food: { ...r.food, ...row.ai }, how: 'ai' }
-  return r
-}
+export const rowFood = row => findFood(row?.name)
+
+/** Whether the table settles the row on its own; otherwise Claude should work it out. */
+export const rowKnown = row => ['exact', 'mine'].includes(rowFood(row)?.how)
 
 /** How the dish is counted by the piece ({ kind, g }), or null for one that is not. */
 export const rowPiece = row => rowFood(row)?.food.piece || null

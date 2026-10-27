@@ -5,7 +5,7 @@
  * status codes and cookie — so the frontend cannot tell the two apart:
  *   health, config, me; passkey sign-up and sign-in; sign out (here and everywhere);
  *   the state document with its revision and conflict rule; activity; Apple Health sync;
- *   the school lunch menu and meal photos (G-PLAN).
+ *   the school lunch menu and the inbox for Claude (G-PLAN).
  * Everything else (push, media, the Coach, admin, pairing, passwords, extra passkeys) answers
  * 404, which the app already reads as "this server does not have that" and hides.
  *
@@ -18,7 +18,7 @@ import { generateRegistrationOptions, verifyRegistrationResponse, generateAuthen
 import { verifyError } from '../api/verify-error.js'
 import { issueHealthToken, hashHealthToken, parseIngest, mergeIngest, daysFrom } from '../api/health.js'
 import { lunchUrl, fetchMonth, lunchFor, isDay } from '../api/school-lunch.js'
-import { photoProvider, parsePhotoBody, recognizeMeal } from '../api/meal-photo.js'
+import { newClaudeToken, hashClaudeToken, looksLikeClaudeToken, bearerOf, parseInboxEntry, appEntry, claudeEntry, parseResult, mergeFoods, MAX_PENDING } from '../api/claude-inbox.js'
 
 export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)`,
@@ -32,6 +32,10 @@ export const SCHEMA = [
   // profile's history grows past that in a few years.
   `CREATE TABLE IF NOT EXISTS state_chunks (uid TEXT NOT NULL, i INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (uid, i))`,
   `CREATE TABLE IF NOT EXISTS health (uid TEXT PRIMARY KEY, doc TEXT NOT NULL)`,
+  // G-PLAN's inbox for Claude (api/claude-inbox.js): one row per entry, keyed uid:id; and the
+  // dataset of foods Claude has worked out, one document per profile.
+  `CREATE TABLE IF NOT EXISTS inbox (k TEXT PRIMARY KEY, uid TEXT NOT NULL, status TEXT NOT NULL, created INTEGER NOT NULL, doc TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS foods (uid TEXT PRIMARY KEY, doc TEXT NOT NULL)`,
 ]
 
 const CHUNK = 900_000
@@ -39,8 +43,8 @@ const MAX_BODY = 5 * 1024 * 1024
 const SESSION_DAYS = 90
 const CHALLENGE_MS = 5 * 60000
 const HEALTH_WRITES_PER_HOUR = 60
-// A photo is a model call against the day's free allowance: a few per meal is plenty.
-const PHOTOS_PER_HOUR = 30
+// Meals sent to the inbox: a few a meal is plenty, and each may carry a photo.
+const INBOX_WRITES_PER_HOUR = 60
 
 class HttpError extends Error { constructor(status, message) { super(message); this.status = status } }
 
@@ -69,7 +73,7 @@ async function readBody(request) {
 // origin check (server.js CSRF_EXEMPT).
 const CSRF_EXEMPT = new Set(['POST /api/register/options', 'POST /api/register/verify', 'POST /api/login/options', 'POST /api/login/verify'])
 
-// `fetch` reaches the school's site (the lunch menu) and Gemini; injectable for the tests.
+// `fetch` reaches the school's site (the lunch menu); injectable for the tests.
 export function createApi(db, env = {}, { fetch: fetchImpl = (...a) => globalThis.fetch(...a) } = {}) {
   const one = (sql, ...p) => db.exec(sql, ...p)[0] || null
   const kvGet = k => one('SELECT v FROM kv WHERE k = ?', k)?.v ?? null
@@ -120,7 +124,16 @@ export function createApi(db, env = {}, { fetch: fetchImpl = (...a) => globalThi
   }
 
   const healthWrites = new Map()   // uid → { start, n }, an hour's window
-  const photoUses = new Map()      // the same, for meal photos
+  const inboxWrites = new Map()    // the same, for meals sent to the inbox
+
+  // The Claude token, kept in kv like the session secret: claude:<uid> holds its hash and dates,
+  // claudeh:<hash> leads back to the profile.
+  const claudeTok = uid => { try { return JSON.parse(kvGet('claude:' + uid) || 'null') } catch { return null } }
+  const readFoods = uid => { try { return JSON.parse(one('SELECT doc FROM foods WHERE uid = ?', uid)?.doc || 'null') || { foods: [] } } catch { return { foods: [] } } }
+  const inboxDocs = (uid, where = '', ...p) => db.exec(`SELECT doc FROM inbox WHERE uid = ?${where} ORDER BY created`, uid, ...p)
+    .map(r => { try { return JSON.parse(r.doc) } catch { return null } }).filter(Boolean)
+  const putInbox = (uid, e) => db.exec('INSERT INTO inbox (k, uid, status, created, doc) VALUES (?, ?, ?, ?, ?) ON CONFLICT(k) DO UPDATE SET status = excluded.status, created = excluded.created, doc = excluded.doc',
+    uid + ':' + e.id, uid, e.status, e.created, JSON.stringify(e))
   const overLimit = (map, uid, max, now) => {
     const w = map.get(uid)
     if (!w || now - w.start > 3600000) { map.set(uid, { start: now, n: 1 }); return 0 }
@@ -180,10 +193,9 @@ export function createApi(db, env = {}, { fetch: fetchImpl = (...a) => globalThi
         push: false, pairing: false, device_link: false,
         ...(openSignup() ? {} : { signup: false }),
         ...(env.DEFAULT_LANG !== '' ? { default_lang: env.DEFAULT_LANG || 'ko' } : {}),
-        ...(session() ? { coach: null } : {}),
-        // G-PLAN: the school lunch menu, and whether photos can be read (a Gemini key, or the
-        // Workers AI binding in wrangler.jsonc).
-        lunch: !!lunchUrl(env), meal_photo: !!photoProvider(env),
+        ...(session() ? { coach: null, claude: { linked: !!claudeTok(session().id) } } : {}),
+        // G-PLAN: the school lunch menu.
+        lunch: !!lunchUrl(env),
       }),
 
       'GET /api/me': () => {
@@ -358,7 +370,7 @@ export function createApi(db, env = {}, { fetch: fetchImpl = (...a) => globalThi
         return json(200, { days: daysFrom(readHealth(u.id), from) })
       },
 
-      /* ---------- G-PLAN: school lunch (api/school-lunch.js), meal photos (api/meal-photo.js) ---------- */
+      /* ---------- G-PLAN: school lunch (api/school-lunch.js) ---------- */
       // One day's menu from the school's site, through a month cached in the database: the
       // school's server is asked at most every few hours, and an old copy answers while it is down.
       'GET /api/lunch': async () => {
@@ -375,19 +387,111 @@ export function createApi(db, env = {}, { fetch: fetchImpl = (...a) => globalThi
         if (r.store) kvSet(k, JSON.stringify(r.store))
         return json(200, r.body)
       },
-      'POST /api/meal/photo': async () => {
+      /* ---------- G-PLAN: the inbox for Claude (api/claude-inbox.js) ---------- */
+      // The owner issues the token here and puts it where the scheduled Claude session reads it.
+      'GET /api/account/claude-token': () => {
         const u = session()
         if (!u) return json(401, { error: 'not signed in' })
-        const provider = photoProvider(env)
-        if (!provider) return json(404, { error: 'meal photos are not set up on this server' })
-        const wait = overLimit(photoUses, u.id, PHOTOS_PER_HOUR, now)
-        if (wait) return json(429, { error: 'too many photos — try again later' }, { 'Retry-After': String(wait) })
-        const input = parsePhotoBody(await readBody(request))
-        if (input.error) return json(400, { error: input.error })
-        const r = await recognizeMeal(provider, input, { fetch: fetchImpl })
-        if (r.error) return json(r.status || 502, { error: r.error })
-        return json(200, r)
+        const tok = claudeTok(u.id)
+        const pending = one("SELECT COUNT(*) AS n FROM inbox WHERE uid = ? AND status = 'pending'", u.id).n
+        return json(200, { active: !!tok, created: tok?.created || null, used: tok?.used || null, pending })
       },
+      'POST /api/account/claude-token': () => {
+        const u = session()
+        if (!u) return json(401, { error: 'not signed in' })
+        const old = claudeTok(u.id)
+        if (old) db.exec('DELETE FROM kv WHERE k = ?', 'claudeh:' + old.h)
+        const token = newClaudeToken()
+        const h = hashClaudeToken(token)
+        kvSet('claude:' + u.id, JSON.stringify({ h, created: now, used: null }))
+        kvSet('claudeh:' + h, u.id)
+        return json(200, { token, created: now })
+      },
+      'DELETE /api/account/claude-token': () => {
+        const u = session()
+        if (!u) return json(401, { error: 'not signed in' })
+        const old = claudeTok(u.id)
+        if (old) db.exec('DELETE FROM kv WHERE k IN (?, ?)', 'claude:' + u.id, 'claudeh:' + old.h)
+        return json(200, { active: false })
+      },
+
+      // The app: a meal written or photographed, for Claude to work out; read back; done with.
+      'POST /api/inbox': async () => {
+        const u = session()
+        if (!u) return json(401, { error: 'not signed in' })
+        const wait = overLimit(inboxWrites, u.id, INBOX_WRITES_PER_HOUR, now)
+        if (wait) return json(429, { error: 'too many meals sent — try again later' }, { 'Retry-After': String(wait) })
+        const p = parseInboxEntry(await readBody(request), now)
+        if (p.error) return json(400, { error: p.error })
+        if (one("SELECT COUNT(*) AS n FROM inbox WHERE uid = ? AND status = 'pending'", u.id).n >= MAX_PENDING) {
+          return json(429, { error: 'the inbox is full — Claude has not read it for a while' })
+        }
+        putInbox(u.id, p.entry)
+        return json(200, { ok: true, entry: appEntry(p.entry) })
+      },
+      'GET /api/inbox': () => {
+        const u = session()
+        if (!u) return json(401, { error: 'not signed in' })
+        return json(200, { entries: inboxDocs(u.id).map(appEntry) })
+      },
+      'POST /api/inbox/ack': async () => {
+        const u = session()
+        if (!u) return json(401, { error: 'not signed in' })
+        const body = await readBody(request)
+        const ids = (Array.isArray(body.ids) ? body.ids : []).filter(x => typeof x === 'string').slice(0, 100)
+        for (const id of ids) db.exec('DELETE FROM inbox WHERE k = ?', u.id + ':' + id)
+        return json(200, { ok: true, removed: ids.length })
+      },
+      'GET /api/foods': () => {
+        const u = session()
+        if (!u) return json(401, { error: 'not signed in' })
+        return json(200, { foods: readFoods(u.id).foods || [] })
+      },
+
+      // Claude, with the token: the pending meals, a result for one, and the dataset.
+      'GET /api/claude/inbox': () => {
+        const u = claudeUser()
+        if (!u) return json(401, { error: 'invalid token' })
+        return json(200, { entries: inboxDocs(u.id, " AND status = 'pending'").slice(0, 20).map(claudeEntry) })
+      },
+      'POST /api/claude/result': async () => {
+        const u = claudeUser()
+        if (!u) return json(401, { error: 'invalid token' })
+        const r = parseResult(await readBody(request))
+        if (r.error) return json(400, { error: r.error })
+        const row = one('SELECT doc FROM inbox WHERE k = ?', u.id + ':' + r.id)
+        if (!row) return json(404, { error: 'no such entry — the owner may have deleted the meal' })
+        const e = JSON.parse(row.doc)
+        // The photo has done its job; the result is all the app needs.
+        Object.assign(e, { status: 'done', result: r.result, doneAt: now, photo: null })
+        putInbox(u.id, e)
+        return json(200, { ok: true, entry: appEntry(e) })
+      },
+      'GET /api/claude/foods': () => {
+        const u = claudeUser()
+        if (!u) return json(401, { error: 'invalid token' })
+        return json(200, { foods: readFoods(u.id).foods || [] })
+      },
+      'POST /api/claude/foods': async () => {
+        const u = claudeUser()
+        if (!u) return json(401, { error: 'invalid token' })
+        const m = mergeFoods(readFoods(u.id), (await readBody(request)).foods, now)
+        if (m.error) return json(400, { error: m.error })
+        db.exec('INSERT INTO foods (uid, doc) VALUES (?, ?) ON CONFLICT(uid) DO UPDATE SET doc = excluded.doc', u.id, JSON.stringify(m.doc))
+        return json(200, { ok: true, added: m.added, count: m.doc.foods.length })
+      },
+    }
+
+    // The profile a Claude token belongs to, or null; each use is dated for the settings card.
+    function claudeUser() {
+      const tok = bearerOf(request.headers.get('authorization'))
+      if (!looksLikeClaudeToken(tok)) return null
+      const uid = kvGet('claudeh:' + hashClaudeToken(tok))
+      const u = uid && userById(uid)
+      if (!u || u.disabled) return null
+      const meta = claudeTok(uid)
+      if (meta) kvSet('claude:' + uid, JSON.stringify({ ...meta, used: now }))
+      return u
     }
 
     function readHealth(uid) {

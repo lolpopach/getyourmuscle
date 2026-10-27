@@ -1,8 +1,9 @@
 // G-PLAN's "today" card on Home (docs/dev/GETYOURMUSCLE_PLAN.md §4.4): the day's checklist —
 // supplements, the four meals, the workout, steps and water — under the budget that is left and
-// the one thing to do next. Tapping a meal opens its sheet: a photo or the food calculator, the
-// school lunch (lunch only), templates in one tap, or a quick entry. The arithmetic is
-// lib/gplan-day.js; this file only lays it out (the food helpers are GplanFood.jsx).
+// the one thing to do next. Tapping a meal opens its sheet: the school lunch (lunch only),
+// templates in one tap, or the meal written down — counted from the food table, and sent to
+// Claude when the table cannot settle it. The arithmetic is lib/gplan-day.js; this file only
+// lays it out (the food helpers and Claude's inbox are GplanFood.jsx).
 import { useEffect, useState } from 'react'
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
@@ -13,10 +14,10 @@ import { MOBILE } from '../lib/mobile.js'
 import { todayISO, fmtDate } from '../lib/format.js'
 import { effectiveRoutines } from '../lib/history.js'
 import { SLOTS } from '../lib/gplan.js'
-import { dayOf, dayTotals, slotTotals, remaining, addMeal, removeMeal, toggleSupp, setDayValue, saveTemplate, removeTemplate, suppStreak, checklist, nextHint } from '../lib/gplan-day.js'
+import { dayOf, dayTotals, slotTotals, remaining, addMeal, removeMeal, toggleSupp, setDayValue, removeTemplate, suppStreak, checklist, nextHint } from '../lib/gplan-day.js'
 import Icon from './Icon.jsx'
-import { Row, Button, NumberField, TextField, Switch } from './ui.jsx'
-import { FoodEntryButtons, LunchCard, useFoodFeatures } from './GplanFood.jsx'
+import { Row, Button, NumberField } from './ui.jsx'
+import { SmartEntry, LunchCard, useFoodFeatures, useClaudeSync } from './GplanFood.jsx'
 
 const ui = () => useUI.getState()
 const update = (...a) => useStore.getState().update(...a)
@@ -72,6 +73,7 @@ export function GplanTodayCard({ onWorkout }) {
   const [iso, setIso] = useState(today)
   const plan = S.gplan
   const synced = useSynced(iso, !!user && !DEMO && !MOBILE)
+  useClaudeSync()
   if (!plan) return null
 
   const day = dayOf(S, iso)
@@ -162,23 +164,9 @@ function MealSheet({ iso, slot, close }) {
   const others = templates.filter(x => x.slot !== slot)
   const [editing, setEditing] = useState(false)
   const [showOthers, setShowOthers] = useState(false)
-  const [form, setForm] = useState({ name: '', kcal: null, p: null, c: null, f: null })
-  const [asTemplate, setAsTemplate] = useState(false)
   const features = useFoodFeatures()
-  const set = k => v => setForm(f => ({ ...f, [k]: v }))
-  const canAdd = (form.kcal || 0) > 0 || (form.p || 0) > 0
 
   const addTpl = tpl => update(st => { addMeal(st, iso, slot, { ...tpl, id: null, tpl: tpl.id }) })
-  const addFree = () => {
-    if (!canAdd) return
-    const item = { ...form, name: form.name.trim() || t('Quick entry') }
-    update(st => {
-      addMeal(st, iso, slot, item)
-      if (asTemplate) saveTemplate(st, slot, item)
-    })
-    setForm({ name: '', kcal: null, p: null, c: null, f: null })
-    setAsTemplate(false)
-  }
   // One button per template: adds it, or in edit mode removes the template (the chip's own hit
   // area, .chip::before, would swallow a tap meant for a button nested inside it).
   const chip = tpl => <button key={tpl.id} className="chip nocap" style={editing ? { color: 'var(--red)' } : undefined}
@@ -194,14 +182,17 @@ function MealSheet({ iso, slot, close }) {
     </div>
 
     {items.length > 0 && <div className="sect-b" style={{ marginBottom: 14 }}>
-      {items.map(x => <Row key={x.id} title={x.name || t('Quick entry')} subtitle={t('{0} kcal · protein {1} g', n0(x.kcal), n0(x.p))}>
+      {items.map(x => <Row key={x.id} title={x.name || t('Quick entry')} subtitle={<>
+        {t('{0} kcal · protein {1} g', n0(x.kcal), n0(x.p))}
+        {x.pending ? ' · ' + t('waiting for Claude') : x.by === 'claude' ? ' · ' + t('by Claude') : ''}
+        {x.detail && <><br />{x.detail}</>}
+      </>}>
         <button className="iconbtn" style={{ width: 32, height: 30, borderRadius: 8, fontSize: 15, color: 'var(--red)' }}
           onClick={() => update(st => { removeMeal(st, iso, slot, x.id) })} aria-label={t('Delete')}><Icon name="trash" /></button>
       </Row>)}
     </div>}
 
     {slot === 'l' && features.lunch && <LunchCard iso={iso} />}
-    <FoodEntryButtons iso={iso} slot={slot} photo={features.photo} />
 
     <div className="row between" style={{ marginBottom: 6 }}>
       <b className="small">{t('Templates')}</b>
@@ -214,18 +205,7 @@ function MealSheet({ iso, slot, close }) {
       {showOthers && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '6px 0 8px' }}>{others.map(chip)}</div>}
     </>}
 
-    <b className="small" style={{ display: 'block', margin: '14px 0 6px' }}>{t('Quick entry')}</b>
-    <TextField value={form.name} onChange={e => set('name')(e.target.value)} placeholder={t('What did you eat?')} maxLength={60} />
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, marginTop: 8 }}>
-      {[['kcal', 'kcal'], ['p', t('Protein')], ['c', t('Carbs')], ['f', t('Fat')]].map(([k, label]) => <label key={k} className="small muted" style={{ display: 'grid', gap: 4 }}>
-        {label}<NumberField value={form[k]} onChange={set(k)} nullable decimal={false} className="field" />
-      </label>)}
-    </div>
-    <div className="row between" style={{ margin: '10px 0' }}>
-      <span className="small">{t('Save as a template')}</span>
-      <Switch checked={asTemplate} onChange={setAsTemplate} aria-label={t('Save as a template')} />
-    </div>
-    <Button variant="primary" icon="plus" disabled={!canAdd} onClick={addFree}>{t('Add')}</Button>
+    <SmartEntry iso={iso} slot={slot} />
     <div style={{ height: 8 }} />
     <Button variant="ghost" onClick={close}>{t('Done')}</Button>
   </>

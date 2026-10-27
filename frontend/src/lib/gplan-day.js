@@ -25,11 +25,16 @@ function touch(S, iso, now) {
   return d
 }
 
+// `pending` (an inbox entry's id) marks a meal whose numbers are the food table's until Claude's
+// answer arrives; `by` says who counted it ('claude') and `detail` how (lib/inbox.js).
 const clean = item => ({
   id: String(item.id || uid()),
   name: String(item.name || '').slice(0, 60),
   kcal: Math.round(num(item.kcal)), p: Math.round(num(item.p)), c: Math.round(num(item.c)), f: Math.round(num(item.f)),
   ...(item.tpl ? { tpl: String(item.tpl) } : {}),
+  ...(item.pending ? { pending: String(item.pending).slice(0, 40) } : {}),
+  ...(item.by ? { by: String(item.by).slice(0, 10) } : {}),
+  ...(item.detail ? { detail: String(item.detail).slice(0, 200) } : {}),
 })
 
 /** Adds a food (or a template's copy) to a slot of the day. Returns the stored item. */
@@ -66,6 +71,7 @@ export function saveTemplate(S, slot, item, now = Date.now()) {
   if (!S.gplan) return null
   const tpl = { ...clean(item), id: 'tpl-' + uid(), slot }
   delete tpl.tpl
+  delete tpl.pending
   S.gplan.templates = [...list(S.gplan.templates), tpl]
   S.gplan._ts = now
   return tpl

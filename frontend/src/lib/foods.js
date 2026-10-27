@@ -1,22 +1,26 @@
-// G-PLAN's food table: what one serving of a Korean dish holds, and how a dish name — typed,
-// read off the school lunch menu, or named by the photo model — finds its row.
+// G-PLAN's food table: what one serving of a Korean dish holds, and how a dish name — typed, or
+// read off the school lunch menu — finds its row.
 //
-// Why a table at all: the photo feature runs on a free vision model, and a small model that names
-// a dish correctly still invents its calories. So the model only says WHAT is on the plate and HOW
-// MUCH (servings); the numbers come from here, the same every time. A systematic error left in
-// these rows does not move the plan either: the weekly check (gplan-adapt.js) reads the real
-// weight trend, not these numbers.
+// Why a table at all: a meal written down is counted the moment it is typed, offline too, and the
+// same dish counts the same every time. What the table cannot settle goes to the scheduled Claude
+// session, which checks its answers against these rows. A systematic error left in them does not
+// move the plan either: the weekly check (gplan-adapt.js) reads the real weight trend, not these
+// numbers.
 //
 // The values are typical single servings in a Korean home or school canteen (밥 1공기 210 g,
 // 국 250 ml, a side dish's usual scoop, fruit around 100 g), rounded from common Korean nutrition
-// references. Pure data and functions; no React.
+// references; the later rows — bakery, convenience store, fast food, delivery, street food and
+// the Vietnamese dishes of the owner's city — the same way, for one person's portion. Foods the
+// table lacks are worked out by the scheduled Claude session and come back as the owner's own
+// (setMyFoods, docs/dev/CLAUDE_MEALS.md). Pure data and functions apart from that one list; no
+// React.
 
 // name[,alias…] | category | grams | kcal | protein | carbs | fat [| piece]
 // Categories: rice, noodle, soup, stew, main, side, kimchi, fruit, dairy, dessert, drink, free.
 // `piece` is how the dish is counted at a shared table, as kind:grams — slice (a 점 of meat),
 // piece (a 조각: chicken, pizza, 전) or each (a 개: 만두, an egg).
 const ROWS = `
-흰쌀밥,쌀밥,밥,공기밥,흰밥,백미밥|rice|210|310|6|68|1
+흰쌀밥,쌀밥,밥,공기밥,공깃밥,흰밥,백미밥|rice|210|310|6|68|1
 흑미밥,잡곡밥,현미밥,보리밥,콩밥,오곡밥,귀리밥|rice|210|315|7|67|2
 햇반,즉석밥|rice|210|315|5|70|1
 볶음밥,계란볶음밥|rice|300|520|13|80|15
@@ -268,6 +272,105 @@ const ROWS = `
 이온음료|drink|250|60|0|15|0
 라떼,카페라떼|drink|300|180|9|14|9
 아메리카노,커피,녹차|drink|300|10|1|1|0
+토스트,버터토스트,잼토스트|dessert|120|330|9|45|12
+계란토스트,길거리토스트|main|200|450|16|48|21
+시리얼,콘푸레이크,씨리얼|dessert|40|155|3|34|1
+오트밀|rice|250|160|6|27|3
+그래놀라|dessert|50|220|5|32|8
+베이글|dessert|100|270|10|53|2
+크림치즈베이글|dessert|130|380|12|56|12
+크루아상,크로와상|dessert|60|250|5|27|14
+소보로빵,단팥빵,크림빵|dessert|90|300|7|46|10
+와플|dessert|100|300|6|38|14
+팬케이크,핫케이크|dessert|150|350|8|55|11
+죽,야채죽,전복죽,소고기죽,닭죽,호박죽,팥죽|rice|350|250|9|45|4
+
+컵밥|rice|280|450|12|75|11
+편의점도시락,도시락|rice|450|750|25|105|25
+편의점샐러드,샐러드팩|side|200|150|10|12|7
+핫바,어묵바|main|80|150|8|14|7
+단백질바,프로틴바|dessert|60|220|20|22|7
+에너지바,초코바|dessert|50|230|3|30|11
+견과류,하루견과,믹스넛|side|25|150|5|6|12
+아몬드|side|20|120|4|4|10|each:1.2
+과자,스낵,감자칩|dessert|60|320|4|36|18
+초콜릿|dessert|30|165|2|17|10
+젤리|dessert|50|160|3|37|0
+컵떡볶이|main|180|350|7|72|4
+
+빅맥|main|215|530|25|45|28
+불고기버거|main|170|400|15|45|17
+치즈버거|main|120|300|15|32|13
+치킨버거,싸이버거|main|230|550|24|50|28
+서브웨이,써브웨이,서브웨이샌드위치|main|230|400|20|50|12
+
+꿔바로우|main|200|520|18|60|23
+마라탕|soup|600|650|30|55|34
+마라샹궈|main|300|380|18|30|21
+양꼬치|main|200|500|35|5|38|each:20
+깐풍기|main|180|480|22|38|26
+유린기|main|200|450|24|30|26
+팔보채|main|250|280|22|15|14
+
+칼국수|noodle|600|500|17|85|9
+수제비|noodle|600|450|14|80|7
+비빔냉면|noodle|500|550|14|105|7
+라볶이|main|400|550|13|100|10
+뼈해장국|soup|600|500|35|25|28
+곰탕|soup|500|300|25|5|20
+순대국|soup|500|450|28|25|26
+육회|main|150|250|28|8|11
+회,모둠회,광어회|main|150|180|33|0|5|slice:15
+초밥|rice|250|450|20|80|5|each:25
+규동,소고기덮밥|rice|450|700|25|100|20
+카츠동,돈까스덮밥|rice|500|850|30|110|30
+리조또|rice|350|550|15|65|25
+감바스|main|200|400|18|5|34
+
+붕어빵|dessert|50|120|3|22|2|each:50
+호떡|dessert|90|230|4|38|7|each:90
+떡꼬치|dessert|100|250|3|45|6
+어묵꼬치,꼬치어묵|side|50|70|5|7|2|each:50
+계란빵|dessert|80|200|7|25|8
+츄러스|dessert|60|240|3|28|13
+야채튀김|side|50|130|2|14|7|each:50
+김말이|side|40|120|2|14|6|each:40
+
+반미,반미샌드위치|main|200|450|18|60|15
+껌땀,깜땀,컴땀|rice|450|650|30|85|20
+반쎄오|main|250|450|15|40|26
+월남쌈,고이꾸온|side|150|180|10|25|4|each:50
+짜조|side|60|150|3|15|9|each:30
+후띠우|noodle|450|430|20|70|7
+분보후에|noodle|550|500|25|70|13
+연유커피,카페쓰어다,베트남커피|drink|200|150|3|25|4
+코코넛커피|drink|300|300|3|40|14
+코코넛워터|drink|330|60|1|14|0
+
+아이스티|drink|300|100|0|25|0
+스무디|drink|350|250|3|55|2
+버블티,밀크티|drink|500|350|3|60|11
+프라푸치노|drink|350|300|4|50|10
+에너지드링크,핫식스,레드불|drink|250|110|0|27|0
+식혜|drink|240|120|1|28|0
+
+블루베리|fruit|100|57|1|14|0
+체리|fruit|100|63|1|16|0
+복숭아|fruit|150|60|1|15|0
+감,단감,홍시|fruit|150|90|1|22|0
+자두|fruit|100|46|1|11|0
+샤인머스캣,청포도|fruit|100|70|1|17|0
+롱안|fruit|100|60|1|15|0
+잭프루트|fruit|100|95|2|23|1
+구아바|fruit|100|68|3|14|1
+파파야|fruit|150|65|1|16|0
+
+소고기,쇠고기|main|100|250|26|0|16
+돼지고기|main|100|250|20|0|18
+참치캔,참치|main|100|190|25|0|10
+새우|main|100|100|20|1|2
+오징어|main|100|90|18|3|1
+코티지치즈|dairy|100|100|11|4|4
 `
 
 const PIECE_KINDS = new Set(['slice', 'piece', 'each'])
@@ -299,8 +402,23 @@ for (const food of FOODS) {
 // Longest first, so the suffix search below takes '치즈닭갈비' as 닭갈비, not 갈비.
 const KEYS = [...INDEX.keys()].sort((a, b) => b.length - a.length)
 
-/** Every name the table knows, for an input's suggestion list. */
-export const foodNames = () => FOODS.map(f => f.name)
+// The owner's own foods: dishes the table did not have, worked out once by the scheduled Claude
+// session (GET /api/foods, docs/dev/CLAUDE_MEALS.md), so the same name gives the same numbers
+// every time after — offline too. Looked up before the table. Set by the screens (setMyFoods);
+// the one piece of module state here, so a lookup keeps its one-argument shape everywhere.
+let MINE = new Map()
+export function setMyFoods(list) {
+  const next = new Map()
+  for (const f of Array.isArray(list) ? list : []) {
+    const k = normName(f?.name)
+    if (!k || !(Number(f.kcal) > 0)) continue
+    next.set(k, { name: String(f.name), aliases: [], cat: CATS.has(f.cat) ? f.cat : 'main', g: Number(f.g) > 0 ? Number(f.g) : 100, kcal: +f.kcal, p: +f.p || 0, c: +f.c || 0, f: +f.f || 0 })
+  }
+  MINE = next
+}
+
+/** Every name the table knows, and the owner's own, for an input's suggestion list. */
+export const foodNames = () => [...FOODS.map(f => f.name), ...[...MINE.values()].map(f => f.name)]
 
 // The protein in a name: '제육김치볶음' is a pork dish whatever 김치볶음 alone would be.
 const PROTEIN = /제육|돼지|돈육|삼겹|목살|보쌈|족발|갈비|돈까스|돈가스|탕수육|오삼|소고기|쇠고기|불고기|차돌|샤브|육개장|닭|치킨|윙봉|오리|오징어|새우|생선|고등어|연어|삼치|조개|해물|낙지|쭈꾸미|주꾸미|명태|북어|동태|코다리|참치|계란|달걀|메추리알|에그|두부|햄|소세지|소시지|스팸|베이컨|함박|미트|고기/
@@ -344,6 +462,7 @@ const asFood = (name, cat, [g, kcal, p, c, f]) => ({ name, aliases: [], cat, g, 
 
 /**
  * The table's row for a dish name, and how sure the match is:
+ *   'mine'    — one of the owner's own foods (setMyFoods), worked out by Claude before
  *   'exact'   — the name or one of its spellings is in the table
  *   'similar' — the name ends in a dish the table has ('치즈닭갈비' → 닭갈비)
  *   'guess'   — built from how the name says it was cooked and whether it holds meat, fish,
@@ -353,6 +472,8 @@ const asFood = (name, cat, [g, kcal, p, c, f]) => ({ name, aliases: [], cat, g, 
 export function findFood(raw) {
   const n = normName(raw)
   if (!n) return null
+  const own = MINE.get(n)
+  if (own) return { food: own, how: 'mine' }
   const hit = INDEX.get(n)
   if (hit) return { food: hit, how: 'exact' }
 
