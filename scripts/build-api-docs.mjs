@@ -126,6 +126,7 @@ const TAGS = {
   password: { title: 'Password', side: 'Optional name &amp; password (PASSWORD_LOGIN)' },
   passkeys: { title: 'Passkeys', side: 'More passkeys &amp; device links' },
   health: { title: 'Apple Health', side: 'Sync from an iOS Shortcut' },
+  gplan: { title: 'G-PLAN', side: 'School lunch &amp; meal photos' },
   data: { title: 'Data', side: 'State sync' },
   push: { title: 'Push', side: 'Notifications &amp; rest timer' },
   activity: { title: 'Activity', side: 'Live presence' },

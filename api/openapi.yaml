@@ -84,6 +84,9 @@ info:
       the language of the sign-in screen and of every profile that never picked one.
     - `TRUST_PROXY=1` — the throttle reads the client address from proxy headers (set by
       the bundled `docker-compose.yml`, where only the web container can reach the API).
+    - `LUNCH_URL` (unset by default) — a school's withschool.co.kr 식단표 page
+      (e.g. `http://kshcm.net/?menu_no=34`): adds `GET /api/lunch` and `lunch: true` in
+      `GET /api/config`.
     - `MEDIA_UPLOADS` (default on; `0` removes the `media` routes and the `media` block of
       `GET /api/config`), `MEDIA_QUOTA_MB` (200 per profile, `0` = no cap),
       `MEDIA_IMAGE_MAX_MB` (2), `MEDIA_GIF_MAX_MB` (8), `MEDIA_VIDEO_MAX_MB` (40),
@@ -153,6 +156,13 @@ tags:
       attached to a logged workout. Stored per profile (one quota for both) and named
       by the SHA-256 of its bytes; the state only carries a `MediaRef`. Every route here is a
       404 when the instance runs with `MEDIA_UPLOADS=0`.
+  - name: gplan
+    description: >-
+      G-PLAN's diet helpers: the school lunch menu read off the school's homepage
+      (`LUNCH_URL`; a 404 while it is unset), and the inbox for Claude — meals the owner wrote
+      or photographed, which a scheduled Claude session reads with a Claude token, works out
+      and answers, keeping a dataset of the foods it has worked out
+      (docs/dev/CLAUDE_MEALS.md).
   - name: coach
     description: >-
       AI Coach — plans, reviews and debriefs. Every route here answers 503 unless the
@@ -261,6 +271,16 @@ paths:
                       always wins; a tag the app has no translation for is ignored.
                   media:
                     $ref: '#/components/schemas/MediaConfig'
+                  lunch:
+                    type: boolean
+                    const: true
+                    description: Present (and true) only when LUNCH_URL is set — the app then shows the school lunch.
+                  claude:
+                    type: object
+                    properties: { linked: { type: boolean, const: true } }
+                    description: >-
+                      Present only to a session whose profile has a Claude token: meals the food
+                      table cannot settle then go to the inbox for Claude.
               examples:
                 anonymous: { value: { invite_only: true, allow_guest: false } }
                 signedInNoCoach: { value: { invite_only: true, allow_guest: false, coach: null } }
@@ -1451,6 +1471,383 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/lunch:
+    get:
+      tags: [gplan]
+      operationId: lunchDay
+      summary: One day's school lunch, read off the school's menu page
+      description: |
+        The month's page is fetched from `LUNCH_URL` (EUC-KR, parsed by `school-lunch.js`) and
+        kept for six hours; while the school's site is down an older copy answers. Dish lines
+        are passed on as the school writes them (`순두부찌개(0.6)`, `돈까스*브라운소스`): what
+        they mean is the app's to read.
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The day's meals; an empty list on a day without school lunch.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date: { type: string, format: date }
+                  meals:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        label: { type: string, description: 'The meal, as the page names it (중식).' }
+                        dishes: { type: array, items: { type: string } }
+                  fetchedAt: { type: integer, description: When the month was read off the school's site (ms). }
+              example: { date: "2026-10-01", meals: [{ label: "중식", dishes: ["흰쌀밥", "순두부찌개(0.6)", "소불고기", "치즈계란말이*케찹", "열무김치", "파인애플"] }], fetchedAt: 1792990000000 }
+        '400':
+          description: '`date` is not YYYY-MM-DD.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: No `LUNCH_URL` on this instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '502':
+          description: The school's site could not be read and no earlier copy of the month is kept.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/account/claude-token:
+    get:
+      tags: [gplan]
+      operationId: claudeTokenStatus
+      summary: Whether a Claude token is issued, when it was last used, and how many meals wait
+      responses:
+        '200':
+          description: The token's state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  active: { type: boolean }
+                  created: { type: integer, nullable: true }
+                  used: { type: integer, nullable: true }
+                  pending: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [gplan]
+      operationId: claudeTokenIssue
+      summary: Issue a Claude token (replaces the one before)
+      description: |
+        For the scheduled Claude session. Shown once; only its SHA-256 is stored. It reads the
+        pending meals and the dataset and writes results and foods — nothing else.
+      responses:
+        '200':
+          description: The token.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string, example: gplanc_… }
+                  created: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    delete:
+      tags: [gplan]
+      operationId: claudeTokenRevoke
+      summary: Revoke the Claude token
+      responses:
+        '200':
+          description: Revoked (or there was none).
+          content:
+            application/json:
+              schema: { type: object, properties: { active: { type: boolean, const: false } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/inbox:
+    get:
+      tags: [gplan]
+      operationId: inboxList
+      summary: The meals sent to Claude, pending and answered
+      description: The app applies each answered entry to its log, then acknowledges it.
+      responses:
+        '200':
+          description: The entries, oldest first (photos are never sent back).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      date: { type: string, format: date }
+                      slot: { type: string, enum: [b, l, s, d] }
+                      mealId: { type: string, nullable: true }
+                      text: { type: string }
+                      hasPhoto: { type: boolean }
+                      status: { type: string, enum: [pending, done] }
+                      created: { type: integer }
+                      result:
+                        nullable: true
+                        type: object
+                        properties:
+                          items: { type: array, items: { type: object, properties: { name: { type: string }, amount: { type: string }, kcal: { type: integer }, p: { type: integer }, c: { type: integer }, f: { type: integer } } } }
+                          kcal: { type: integer }
+                          p: { type: integer }
+                          c: { type: integer }
+                          f: { type: integer }
+                          note: { type: string }
+                          by: { type: string, const: claude }
+                      doneAt: { type: integer, nullable: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [gplan]
+      operationId: inboxAdd
+      summary: Send a meal to Claude
+      description: |
+        A meal as written, with an optional photo, for the meal the app already logged with the
+        food table's estimate (`mealId`). Sending the same `id` again replaces the entry.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, date, slot]
+              properties:
+                id: { type: string, pattern: '^[A-Za-z0-9_-]{4,40}$' }
+                date: { type: string, format: date }
+                slot: { type: string, enum: [b, l, s, d] }
+                mealId: { type: string }
+                text: { type: string, maxLength: 500, description: 'What was eaten, as written: "제육덮밥, 계란후라이 2개, 밥 반 공기".' }
+                photo: { type: string, description: 'A JPEG, PNG or WebP data URL, at most 1 MB.' }
+                estimate: { type: object, description: The food table's estimate the app logged meanwhile., properties: { kcal: { type: number }, p: { type: number }, c: { type: number }, f: { type: number } } }
+      responses:
+        '200':
+          description: Queued.
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean }, entry: { type: object } } }
+        '400':
+          description: No text and no photo, or an id, date, slot or photo that does not parse.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429':
+          description: 30 meals already wait for Claude, or over 60 sent this hour.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/inbox/ack:
+    post:
+      tags: [gplan]
+      operationId: inboxAck
+      summary: Remove entries the app has applied (or no longer wants)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, properties: { ids: { type: array, items: { type: string }, maxItems: 100 } } }
+      responses:
+        '200':
+          description: Removed.
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean }, removed: { type: integer } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/foods:
+    get:
+      tags: [gplan]
+      operationId: foodsList
+      summary: The foods Claude has worked out for this profile
+      description: The app looks these up before its own food table.
+      responses:
+        '200':
+          description: One serving each.
+          content:
+            application/json:
+              schema: { type: object, properties: { foods: { type: array, items: { type: object, properties: { name: { type: string }, cat: { type: string, enum: [rice, noodle, soup, stew, main, side, kimchi, free, fruit, dairy, dessert, drink], description: How the lunch planner portions it; main when left out. }, g: { type: integer, description: One serving's weight. }, kcal: { type: integer }, p: { type: number }, c: { type: number }, f: { type: number }, note: { type: string }, at: { type: integer } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/claude/inbox:
+    get:
+      tags: [gplan]
+      operationId: claudeInbox
+      summary: 'Claude: the meals waiting to be worked out'
+      security: [{ claudeToken: [] }]
+      responses:
+        '200':
+          description: Up to 20 pending entries, oldest first, with their photos.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        date: { type: string, format: date }
+                        slot: { type: string }
+                        text: { type: string }
+                        photo: { type: string, nullable: true }
+                        estimate: { type: object, nullable: true }
+                        created: { type: integer }
+        '401':
+          description: No token, or not a valid one (counts toward the address pause).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/claude/result:
+    post:
+      tags: [gplan]
+      operationId: claudeResult
+      summary: 'Claude: the worked-out nutrition of one entry'
+      description: Totals are added up from the items. The entry's photo is dropped.
+      security: [{ claudeToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, items]
+              properties:
+                id: { type: string }
+                items: { type: array, maxItems: 30, items: { type: object, required: [name, kcal], properties: { name: { type: string }, amount: { type: string, example: 1공기 }, kcal: { type: number }, p: { type: number }, c: { type: number }, f: { type: number } } } }
+                note: { type: string, maxLength: 300 }
+      responses:
+        '200':
+          description: Answered.
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean }, entry: { type: object } } }
+        '400':
+          description: No items, or an item without a name or kcal.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: No token, or not a valid one.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: No such entry — the owner may have deleted the meal.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/claude/foods:
+    get:
+      tags: [gplan]
+      operationId: claudeFoods
+      summary: 'Claude: the dataset so far'
+      security: [{ claudeToken: [] }]
+      responses:
+        '200':
+          description: One serving each.
+          content:
+            application/json:
+              schema: { type: object, properties: { foods: { type: array, items: { type: object, properties: { name: { type: string }, cat: { type: string, enum: [rice, noodle, soup, stew, main, side, kimchi, free, fruit, dairy, dessert, drink], description: How the lunch planner portions it; main when left out. }, g: { type: integer, description: One serving's weight. }, kcal: { type: integer }, p: { type: number }, c: { type: number }, f: { type: number }, note: { type: string }, at: { type: integer } } } } } }
+        '401':
+          description: No token, or not a valid one.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      tags: [gplan]
+      operationId: claudeFoodsAdd
+      summary: 'Claude: add foods to the dataset'
+      description: Merged by name (spaces and punctuation ignored); a name already there is replaced.
+      security: [{ claudeToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, properties: { foods: { type: array, maxItems: 300, items: { type: object, properties: { name: { type: string }, cat: { type: string, enum: [rice, noodle, soup, stew, main, side, kimchi, free, fruit, dairy, dessert, drink], description: How the lunch planner portions it; main when left out. }, g: { type: integer, description: One serving's weight. }, kcal: { type: integer }, p: { type: number }, c: { type: number }, f: { type: number }, note: { type: string }, at: { type: integer } } } } } }
+      responses:
+        '200':
+          description: Merged.
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean }, added: { type: integer }, count: { type: integer } } }
+        '400':
+          description: A food without a name, kcal or g.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: No token, or not a valid one.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/claude/lunch:
+    get:
+      tags: [gplan]
+      operationId: claudeLunchMenus
+      summary: 'Claude: the monthly menus sent so far'
+      description: The months the scheduled session read off the school's menu PDF, so it can tell whether a month is already up to date. Six months at most.
+      security: [{ claudeToken: [] }]
+      responses:
+        '200':
+          description: By month.
+          content:
+            application/json:
+              schema: { type: object, properties: { months: { type: object, additionalProperties: { type: object, properties: { month: { type: string }, days: { type: object, additionalProperties: { type: array, items: { type: object, properties: { label: { type: string }, dishes: { type: array, items: { type: string } } } } } }, pdf: { type: string }, at: { type: integer } } } } } }
+        '401':
+          description: No token, or not a valid one.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      tags: [gplan]
+      operationId: claudeLunchMenu
+      summary: 'Claude: a month''s menu from the school''s PDF'
+      description: The school posts the whole month as a PDF ahead of time, while its calendar page is filled in weeks late. GET /api/lunch answers from the calendar page for a day it has, and from this menu for the others. Replaces the month sent before.
+      security: [{ claudeToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [month, days], properties: { month: { type: string, example: '2026-10' }, pdf: { type: string, description: 'A fingerprint (hex) of the PDF the menu was read from, given back by GET so the next run knows that file was already sent.' }, days: { type: object, description: Each school day of the month and its lunch dishes as the PDF writes them, allergy codes left out., additionalProperties: { type: array, maxItems: 30, items: { type: string } } } } }
+      responses:
+        '200':
+          description: Stored.
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean }, month: { type: string }, days: { type: integer } } }
+        '400':
+          description: No month, a day outside it, or a day without dishes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: No token, or not a valid one.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: No school menu is set up (LUNCH_URL empty).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/device-link/options:
     post:
@@ -3039,6 +3436,13 @@ components:
       description: >-
         The write-only Apple Health sync token (`gymh_…`) from `POST /api/account/health-token`,
         carried by the iOS Shortcut. Good for `POST /api/health/ingest` only.
+    claudeToken:
+      type: http
+      scheme: bearer
+      description: >-
+        A G-PLAN Claude token (`gplanc_…`) from `POST /api/account/claude-token`, held by the
+        scheduled Claude session. Reads the pending meals and the dataset, writes results and
+        foods; nothing else.
     healthKey:
       type: apiKey
       in: query
