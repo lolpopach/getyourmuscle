@@ -1665,7 +1665,7 @@ export default {
   'Enter how long it took — at least 1 minute.': '걸린 시간을 입력하세요 — 최소 1분.',
   // G-PLAN starter plan (sheets.jsx PLAN_COPY)
   'G-PLAN Solid Build': 'G-PLAN 다부진 플랜',
-  'Chest and shoulders, back and arms first, two leg days and an optional upper-body volume day.': '가슴 어깨, 등 팔을 먼저 키우고, 하체 2일과 선택 상체 볼륨 데이를 더한 플랜.',
+  'Chest and shoulders, back, and a day for arms, with one leg day and an optional upper-body volume day.': '가슴 어깨, 등, 팔을 하루씩 따로 하고, 하체 1일과 선택 상체 볼륨 데이를 더한 플랜.',
   'Load my G-PLAN routine': '내 G-PLAN 루틴 넣기',
   // Apple Health sync (components/AppleHealth.jsx)
   'Set the request body to JSON, not Form.': '요청 본문(Request Body)을 ‘양식(Form)’이 아니라 ‘JSON’으로 바꾸세요.',

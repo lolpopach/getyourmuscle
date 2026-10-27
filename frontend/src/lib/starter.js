@@ -33,16 +33,19 @@ const FIVE_BY_FIVE = [
 ]
 
 // G-PLAN's own plan (docs/dev/GETYOURMUSCLE_PLAN.md §2.4.0): a lean, solid build — side delts,
-// upper chest, back and arms first — while cutting slowly. Written out in full, the way the
-// plan prescribes it, so a loaded routine needs no editing before the first session:
+// upper chest, back and arms first — while cutting slowly. Three upper days (chest and
+// shoulders, back, arms and shoulders) and one leg day that keeps the legs while the upper body
+// grows, plus an optional upper-body volume day. Written out in full, the way the plan prescribes
+// it, so a loaded routine needs no editing before the first session:
 //   - a rep range per exercise under double progression (the routine's `prog`): reps climb to
 //     the top of the range at one weight, then the weight goes up and reps go back to the bottom
 //   - the rest the plan asks for: 2–3 min on the big lifts, 60–90 s on the small ones
 //   - two warm-up sets on each day's first lift
 //   - the plan's cues as notes (the left arm is ~5 % smaller, so it sets the reps)
 //   - the incline treadmill walk after weights on the four main days, toward the day's steps
-// Weekly direct sets, main days / with the optional Saturday: side delts 10/14, upper chest 7/10,
-// back 10/13 plus rear delts, triceps 6/9, quads 13, hamstrings 9 — the plan's §2.4 targets.
+// Biceps are trained Tuesday and Friday, triceps Monday and Friday, so no arm day follows
+// another. Weekly direct sets, main days / with the optional Saturday: biceps 12, triceps 12,
+// side delts 11/14, upper chest 7/13, back 10/13 plus rear delts, quads 9, hamstrings 6.
 const LEFT_SETS = '왼팔이 멈추면 그 세트는 끝'
 const SMALL_LAST = '반동 없이 · 마지막 세트는 실패 직전까지'
 // [id, sets, [bottom, top], rest seconds, extra fields]
@@ -60,50 +63,53 @@ const GPLAN_SOLID = [
     lift('0194', 3, [10, 12], 75),                                  // overhead rope triceps extension
     inclineWalk
   ]],
-  ['g-lower-a', '하체 A · 스쿼트', 'legs', [
-    lift('0043', 3, [6, 8], 180, first),                            // barbell squat
-    lift('0085', 3, [8, 10], 150),                                  // Romanian deadlift
-    lift('0739', 2, [10, 12], 120),                                 // leg press
-    lift('0586', 3, [10, 12], 75),                                  // lying leg curl
-    lift('0594', 3, [12, 15], 60),                                  // seated calf raise
-    lift('0472', 3, [10, 12], 60),                                  // hanging leg raise
-    inclineWalk
-  ]],
-  ['g-upper-b', '상체 B · 등 팔', 'pullup', [
+  ['g-upper-b', '상체 B · 등', 'pullup', [
     lift('2330', 4, [8, 10], 120, first),                           // lat pulldown
     lift('0027', 3, [8, 10], 150),                                  // barbell row
     lift('0861', 3, [10, 12], 90),                                  // seated cable row
     lift('0203', 3, [12, 15], 60),                                  // face pull (rope rear-delt row)
     lift('0178', 3, [12, 15], 60, { note: SMALL_LAST }),            // cable lateral raise
     lift('0447', 3, [8, 10], 75),                                   // EZ-bar curl
-    lift('0200', 3, [10, 12], 75),                                  // rope pushdown
     inclineWalk
   ]],
-  ['g-lower-b', '하체 B · 레그프레스', 'legs', [
-    lift('0410', 3, [8, 10], 120, { ...first, note: '다리마다 · 왼다리부터, 오른다리는 같은 횟수까지' }),  // split squat
+  // The one leg day: squat, hinge, press, curl, extension — about 9 sets for the quads and 6 for
+  // the hamstrings, enough to keep the legs through the cut.
+  ['g-lower', '하체 · 스쿼트', 'legs', [
+    lift('0043', 4, [6, 8], 180, first),                            // barbell squat
+    lift('0085', 3, [8, 10], 150),                                  // Romanian deadlift
     lift('0739', 3, [10, 12], 120),                                 // leg press
     lift('0586', 3, [10, 12], 75),                                  // lying leg curl
     lift('0585', 2, [12, 15], 60),                                  // leg extension
-    lift('0334', 3, [12, 15], 60, { note: SMALL_LAST }),            // dumbbell lateral raise
-    lift('0605', 3, [12, 15], 60),                                  // standing calf raise
-    lift('0175', 3, [12, 15], 60),                                  // cable crunch
+    lift('0594', 3, [12, 15], 60),                                  // seated calf raise
+    lift('0472', 3, [10, 12], 60),                                  // hanging leg raise
     inclineWalk
   ]],
-  // Saturday is also an interval-running day (§2.4.1), so it carries no incline walk.
+  // Biceps and triceps take turns, so each rests while the other works.
+  ['g-arms', '팔 · 어깨', 'arm', [
+    lift('0030', 3, [8, 10], 120, first),                           // close-grip bench press
+    lift('0031', 3, [8, 10], 90),                                   // barbell curl
+    lift('0060', 3, [10, 12], 75),                                  // skull crusher
+    lift('0318', 3, [10, 12], 75, { note: LEFT_SETS }),             // incline dumbbell curl
+    lift('0334', 4, [12, 15], 60, { note: SMALL_LAST }),            // dumbbell lateral raise
+    lift('0200', 3, [10, 12], 60),                                  // rope pushdown
+    lift('0313', 3, [10, 12], 60, { note: LEFT_SETS }),             // dumbbell hammer curl
+    inclineWalk
+  ]],
+  // The day after the arm day, so no arms. Saturday is also an interval-running day (§2.4.1),
+  // so it carries no incline walk.
   ['g-upper-c', '상체 볼륨 (선택)', 'figureStrength', [
     lift('0757', 3, [10, 12], 120, first),                          // smith incline press
     lift('0292', 3, [10, 12], 75, { note: '한 팔씩 · 왼팔부터, 횟수는 한 팔 기준' }),  // one-arm dumbbell row
-    lift('0334', 4, [12, 15], 60, { note: SMALL_LAST }),            // dumbbell lateral raise
-    lift('0378', 3, [12, 15], 60),                                  // dumbbell rear fly
-    lift('0313', 3, [10, 12], 60, { note: LEFT_SETS }),             // dumbbell hammer curl
-    lift('0200', 3, [10, 12], 60)                                   // rope pushdown
+    lift('0179', 3, [12, 15], 75, { note: '아래에서 위로 — 윗가슴' }),  // low-to-high cable fly
+    lift('0334', 3, [12, 15], 60, { note: SMALL_LAST }),            // dumbbell lateral raise
+    lift('0378', 3, [12, 15], 60)                                   // dumbbell rear fly
   ]]
 ]
 
 // [weekday, routineKey] — weekday is a DAYN index, so 1 is Monday. Fixed weeks only: every
 // plan repeats the same seven days, which is all the weekly plan model can represent.
 const PLANS = {
-  'gplan-solid': { routines: GPLAN_SOLID, routine: { prog: 'double' }, schedule: [[1, 'g-upper-a'], [2, 'g-lower-a'], [4, 'g-upper-b'], [5, 'g-lower-b'], [6, 'g-upper-c']] },
+  'gplan-solid': { routines: GPLAN_SOLID, routine: { prog: 'double' }, schedule: [[1, 'g-upper-a'], [2, 'g-upper-b'], [4, 'g-lower'], [5, 'g-arms'], [6, 'g-upper-c']] },
   ppl: { routines: PPL, schedule: [[1, 'push'], [3, 'pull'], [5, 'legs']] },
   'upper-lower': { routines: UPPER_LOWER, schedule: [[1, 'upper-a'], [2, 'lower-a'], [4, 'upper-b'], [5, 'lower-b']] },
   'full-body': { routines: FULL_BODY, schedule: [[1, 'fb-a'], [3, 'fb-b'], [5, 'fb-c']] },
