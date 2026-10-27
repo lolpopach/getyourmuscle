@@ -6,13 +6,13 @@ import React, { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { useStore } from '../store/useStore.js'
-import { starterPlanSheet } from '../sheets.jsx'
+import { loadStarterPlan, starterPlanSheet } from '../sheets.jsx'
 import Home from './Home.jsx'
 import Plan from './Plan.jsx'
 
 vi.mock('react-router-dom', () => ({ useNavigate: () => () => {} }))
 vi.mock('../sheets.jsx', () => ({
-  starterPlanSheet: vi.fn(), bwSheet: vi.fn(), goalSheet: vi.fn(), dayOverrideSheet: vi.fn(),
+  starterPlanSheet: vi.fn(), loadStarterPlan: vi.fn(), bwSheet: vi.fn(), goalSheet: vi.fn(), dayOverrideSheet: vi.fn(),
   calendarSheet: vi.fn(), startFlow: vi.fn(), bwDeltaColor: () => '', weighInsSheet: vi.fn(),
   dayAssignSheet: vi.fn(), planToolsSheet: vi.fn(),
 }))
@@ -21,6 +21,7 @@ let host, root
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
   starterPlanSheet.mockClear()
+  loadStarterPlan.mockClear()
   useStore.setState(s => ({ S: { ...s.S, routines: [], week: {}, active: null }, user: null }))
   host = document.createElement('div')
   document.body.appendChild(host)
@@ -47,5 +48,23 @@ describe.each([['Home', Home], ['Plan', Plan]])('%s empty state', (_name, View) 
     useStore.setState(s => ({ S: { ...s.S, routines: [{ id: 'r', name: 'Mine', emoji: 'star', ex: [] }] } }))
     act(() => root.render(<View />))
     expect(starterButton()).toBeFalsy()
+  })
+})
+
+describe('Home empty state', () => {
+  const gplanButton = () => [...host.querySelectorAll('button')].find(b => b.textContent === 'Load my G-PLAN routine')
+
+  it('puts G-PLAN’s own routine in with one tap, without opening the chooser', () => {
+    act(() => root.render(<Home />))
+    act(() => { gplanButton().click() })
+    expect(loadStarterPlan).toHaveBeenCalledTimes(1)
+    expect(loadStarterPlan).toHaveBeenCalledWith('gplan-solid')
+    expect(starterPlanSheet).not.toHaveBeenCalled()
+  })
+
+  it('drops it with the rest of the welcome card once there are routines', () => {
+    useStore.setState(s => ({ S: { ...s.S, routines: [{ id: 'r', name: 'Mine', emoji: 'star', ex: [] }] } }))
+    act(() => root.render(<Home />))
+    expect(gplanButton()).toBeFalsy()
   })
 })

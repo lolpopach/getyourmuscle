@@ -1665,7 +1665,8 @@ export default {
   'Enter how long it took — at least 1 minute.': 'Indique combien de temps ça a duré — au moins 1 minute.',
   // G-PLAN starter plan (sheets.jsx PLAN_COPY)
   'G-PLAN Solid Build': 'G-PLAN Solid Build',
-  'Chest and shoulders, back and arms first, two leg days and an optional upper-body volume day.': 'Chest and shoulders, back and arms first, two leg days and an optional upper-body volume day.',
+  'Chest and shoulders, back, two leg days and a day for arms.': 'Chest and shoulders, back, two leg days and a day for arms.',
+  'Load my G-PLAN routine': 'Load my G-PLAN routine',
   // Apple Health sync (components/AppleHealth.jsx) — English until translated
   'Set the request body to JSON, not Form.': 'Set the request body to JSON, not Form.',
   'No steps or dist came with it — add the two fields (type Number) to the request body.': 'No steps or dist came with it — add the two fields (type Number) to the request body.',
