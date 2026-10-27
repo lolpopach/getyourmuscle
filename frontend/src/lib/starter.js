@@ -43,12 +43,13 @@ const FIVE_BY_FIVE = [
 //     how to warm up instead)
 //   - the plan's cues as notes (the left arm is ~5 % smaller, so it sets the reps)
 //   - the incline treadmill walk after weights on the four weekdays, toward the day's steps
-//   - the gym's machines where they do the job as well: a chest press for the flat press, a
-//     reverse pec deck for the rear delts (Advanced Fitness, 2026-10-27)
-// The leg days are Tuesday and Friday, biceps Thursday and Saturday, triceps and chest Monday
-// and Saturday, so nothing is trained two days running. Weekly sets: chest 13 (upper 7, dips 3),
-// biceps 12, triceps 12 counting dips, quads 14, hamstrings 9, side delts 13, rear delts 6,
-// back 10.
+//   - the gym's machines where they do the job as well: a chest press for the flat press, the
+//     pec deck for a chest fly on the back day, a reverse pec deck for the rear delts
+//     (Advanced Fitness, 2026-10-27)
+// The leg days are Tuesday and Friday, biceps Thursday and Saturday, triceps Monday and
+// Saturday, chest Monday, Thursday and Saturday, so nothing is trained two days running. Weekly
+// sets: chest 16 (upper 7, dips 3), biceps 12, triceps 12 counting dips, quads 14, hamstrings 9,
+// side delts 13, rear delts 6, back 10.
 const LEFT_SETS = '왼팔이 멈추면 그 세트는 끝'
 const SMALL_LAST = '반동 없이 · 마지막 세트는 실패 직전까지'
 // [id, sets, [bottom, top], rest seconds, extra fields]
@@ -80,6 +81,7 @@ const GPLAN_SOLID = [
     lift('2330', 4, [8, 10], 120, first),                           // lat pulldown
     lift('0027', 3, [8, 10], 150),                                  // barbell row
     lift('0861', 3, [10, 12], 90),                                  // seated cable row
+    lift('0596', 3, [12, 15], 75, { note: '가슴 펴고, 손잡이를 모은 끝에서 1초 쥐어짜기' }),  // pec deck (chest fly machine)
     lift('0203', 3, [12, 15], 60),                                  // face pull (rope rear-delt row)
     lift('0178', 3, [12, 15], 60, { note: SMALL_LAST }),            // cable lateral raise
     lift('0447', 3, [8, 10], 75),                                   // EZ-bar curl
