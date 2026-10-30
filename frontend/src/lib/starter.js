@@ -35,8 +35,10 @@ const FIVE_BY_FIVE = [
 // G-PLAN's own plan (docs/dev/GETYOURMUSCLE_PLAN.md §2.4.0): a lean, solid build while cutting
 // slowly. The goal above all is broad shoulders and a wide frame (the user, 2026-10-30), so the
 // side delts and the lats come first: laterals on every training day, early in the session on
-// Monday and Friday, and a one-arm cable pulldown beside the pulldown (the user's pick: the
-// longest lat stretch, one side at a time, so the smaller left side sets the reps). Four days: chest and shoulders, a leg
+// Monday and Friday, and a lat pullaround beside the pulldown (the user's pick): one arm on a
+// diagonal from high and wide down to the hip, along the lat fibres, with the longest stretch,
+// one side at a time so the smaller left side sets the reps. The catalogue has no pullaround, so
+// it is logged as the one-arm cable pulldown and the note says how it is done. Four days: chest and shoulders, a leg
 // day, back, and a day for arms, with the weekend free for football. Written out in full, the
 // way the plan prescribes it, so a loaded routine needs no editing before the first session:
 //   - a rep range per exercise under double progression (the routine's `prog`): reps climb to
@@ -92,7 +94,7 @@ const GPLAN_SOLID = [
   ]],
   ['g-upper-b', '상체 B · 등', 'pullup', [
     lift('2330', 4, [8, 10], 120, first),                           // lat pulldown
-    lift('3563', 3, [10, 12], 60, { note: '벤치를 가로로 놓고 옆으로 앉아서 · 팔꿈치를 엉덩이 쪽으로 · 왼팔부터, 횟수는 한 팔 기준' }),  // one-arm cable pulldown, seated sideways
+    lift('3563', 3, [10, 12], 60, { note: '랫 풀어라운드: 벤치를 가로로 놓고 옆으로 앉아, 위·바깥에서 엉덩이 쪽으로 팔을 대각선으로 당기기 · 왼팔부터, 횟수는 한 팔 기준' }),  // lat pullaround: one-arm cable pulldown, seated sideways, pulled on a diagonal
     lift('0327', 3, [8, 10], 120, { note: '가슴을 벤치에 대고 — 허리 · 허벅지 뒤는 쉬게' }),  // chest-supported dumbbell row
     lift('0861', 3, [10, 12], 90),                                  // seated cable row
     lift('0203', 3, [12, 15], 60),                                  // face pull (rope rear-delt row)
