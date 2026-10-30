@@ -33,33 +33,36 @@ const FIVE_BY_FIVE = [
 ]
 
 // G-PLAN's own plan (docs/dev/GETYOURMUSCLE_PLAN.md §2.4.0): a lean, solid build while cutting
-// slowly. The goal above all is broad shoulders and a wide frame (the user, 2026-10-30), so the
-// side delts and the lats come first: laterals on every training day, early in the session on
-// Monday and Friday, and a lat pullaround beside the pulldown (the user's pick): one arm on a
-// diagonal from high and wide down to the hip, along the lat fibres, with the longest stretch,
-// one side at a time so the smaller left side sets the reps. The catalogue has no pullaround, so
-// it is logged as the one-arm cable pulldown and the note says how it is done. Four days: chest and shoulders, a leg
-// day, back, and a day for arms, with the weekend free for football. Written out in full, the
-// way the plan prescribes it, so a loaded routine needs no editing before the first session:
+// slowly. Four lifting days (chest and shoulders, legs, back, arms) and a short core day, with the
+// weekend free for football. Written out in full, the way the plan prescribes it, so a loaded
+// routine needs no editing before the first session:
 //   - a rep range per exercise under double progression (the routine's `prog`): reps climb to
 //     the top of the range at one weight, then the weight goes up and reps go back to the bottom
 //   - the rest the plan asks for: 2–3 min on the big lifts, 60–90 s on the small ones
 //   - two warm-up sets on each day's first lift (Friday's dips are bodyweight: its note says
 //     how to warm up instead)
 //   - the plan's cues as notes (the left arm is ~5 % smaller, so it sets the reps)
-//   - the incline treadmill walk after weights every session, toward the day's steps
+//   - the incline treadmill walk after weights on the four lifting days, toward the day's steps
 //   - the gym's machines where they do the job as well: a chest press for the flat press, the
-//     pec deck for a second fly, a reverse pec deck for the rear delts (Advanced Fitness,
-//     2026-10-27)
-// Monday is the chest day (the user's call: the presses and both flies together), with
-// Friday's dips as the chest's second day. One leg day: two left the user too sore for the
-// upper-body days (2026-10-30). It sits on Tuesday, so the legs are recovered for weekend
-// football, and the arm day on Friday, so Monday starts after two days off (both their calls).
-// The back day follows the leg day, so its row is chest-supported: sore hamstrings and lower back
-// stay out of it. Biceps Wednesday and Friday, triceps and chest Monday and Friday, so nothing is
-// trained two days running. Weekly sets: side delts 16, lats 7 (back 13 with the rows), rear
-// delts 6, chest 16 (Monday 13, upper 7), biceps 12, triceps 12 counting dips, quads 8,
-// hamstrings 6.
+//     pec deck for a second fly, a reverse pec deck for the rear delts (Advanced Fitness)
+//
+// The user's choices, in the order they came:
+//   - Width above all — broad shoulders and a wide frame. The side delts and the lats come
+//     first: a lateral raise on every lifting day, early on Monday and Friday, and a lat
+//     pullaround beside the pulldown (one arm on a diagonal from high and wide down to the hip,
+//     along the lat fibres; one side at a time, so the smaller left side sets the reps). The
+//     catalogue has no pullaround, so it is logged as the one-arm cable pulldown and its note
+//     says how it is done.
+//   - Monday is the chest day (both presses and both flies); Friday's dips are its second day.
+//   - One leg day: two left the user too sore for the other days. On Tuesday, so the legs are
+//     recovered for weekend football; the back day after it uses a chest-supported row, so sore
+//     hamstrings and lower back stay out of it.
+//   - The arm day on Friday, so Monday follows two days off.
+//   - A smaller waist: that comes from the cut. Thursday's core day trains the deep core, the
+//     abs that show once the fat is off, and the obliques against rotation only.
+// Nothing is trained two days running: biceps Wed/Fri, triceps and chest Mon/Fri, abs Tue/Thu.
+// Weekly sets: side delts 16, lats 7 (back 13 with the rows), rear delts 6, chest 16 (Monday 13,
+// upper 7), biceps 12, triceps 12 counting dips, abs 15, quads 8, hamstrings 6.
 const LEFT_SETS = '왼팔이 멈추면 그 세트는 끝'
 const SMALL_LAST = '반동 없이 · 마지막 세트는 실패 직전까지'
 // [id, sets, [bottom, top], rest seconds, extra fields]
@@ -102,6 +105,14 @@ const GPLAN_SOLID = [
     lift('0447', 3, [8, 10], 75),                                   // EZ-bar curl
     inclineWalk
   ]],
+  // The short core day (~20 min, before Thursday's interval run). No loaded side bends or twists:
+  // they thicken the waist. No incline walk: Thursday runs.
+  ['g-core', '코어 · 허리', 'abs', [
+    lift('0175', 3, [12, 15], 60, { note: '무릎 꿇고 로프를 머리 옆에 · 엉덩이는 고정, 갈비뼈를 골반 쪽으로 말기 · 팔로 당기지 않기' }),  // cable crunch
+    lift('0857', 3, [8, 10], 60, { note: '무릎 대고 시작 · 배에 힘 주고 허리가 꺾이기 전까지만 나가기 · 돌아올 때 배로 당기기' }),  // ab wheel rollout
+    lift('0276', 3, [8, 10], 45, { note: '허리를 바닥에 붙인 채 반대쪽 팔다리를 천천히 뻗기 · 숨을 내쉬며 · 횟수는 한쪽 기준' }),  // dead bug
+    lift('0979', 3, [10, 12], 45, { note: '케이블이나 밴드를 옆에 두고 가슴 앞에서 쭉 밀어 2초 버티기 · 몸이 돌아가지 않게 · 한쪽 기준, 양쪽 다' })  // pallof press
+  ]],
   // Dips open it: the lower chest and the triceps in one lift, and the chest's second day of the
   // week. Then biceps and triceps take turns, so each rests while the other works.
   ['g-arms', '팔 · 어깨', 'arm', [
@@ -120,7 +131,7 @@ const GPLAN_SOLID = [
 // [weekday, routineKey] — weekday is a DAYN index, so 1 is Monday. Fixed weeks only: every
 // plan repeats the same seven days, which is all the weekly plan model can represent.
 const PLANS = {
-  'gplan-solid': { routines: GPLAN_SOLID, routine: { prog: 'double' }, schedule: [[1, 'g-upper-a'], [2, 'g-lower'], [3, 'g-upper-b'], [5, 'g-arms']] },
+  'gplan-solid': { routines: GPLAN_SOLID, routine: { prog: 'double' }, schedule: [[1, 'g-upper-a'], [2, 'g-lower'], [3, 'g-upper-b'], [4, 'g-core'], [5, 'g-arms']] },
   ppl: { routines: PPL, schedule: [[1, 'push'], [3, 'pull'], [5, 'legs']] },
   'upper-lower': { routines: UPPER_LOWER, schedule: [[1, 'upper-a'], [2, 'lower-a'], [4, 'upper-b'], [5, 'lower-b']] },
   'full-body': { routines: FULL_BODY, schedule: [[1, 'fb-a'], [3, 'fb-b'], [5, 'fb-c']] },

@@ -41,7 +41,7 @@ describe('Brazilian Portuguese locale', () => {
     // has to be taught is a number nobody reads. What the numbers stood for is asserted above.
     // If the hash fails, review the changed keys and wording before accepting a new one. From
     // frontend/: node scripts/pt-br-inheritance-fingerprint.mjs --list
-    expect(fingerprint, 'pt-PT inheritance changed; review the inherited pt-BR wording').toBe('f63d149735d93377cfa40f510d7420e88dee77476de5b6212ba629a77319a22e')
+    expect(fingerprint, 'pt-PT inheritance changed; review the inherited pt-BR wording').toBe('812df1f8605d89201631889ca503f6827fffd736e901a3917ac2382120a9beff')
   })
 
   test('does not leak European Portuguese UI terms', () => {
