@@ -12,9 +12,8 @@ const APPROVED = {
   // [id, sets, reps] here; the rest of G-PLAN's prescription is pinned in its own block below.
   'gplan-solid': [
     [1, '상체 A · 가슴 어깨', [['0314', 4, 10], ['0577', 3, 10], ['0405', 3, 10], ['0334', 4, 15], ['0179', 3, 15], ['0596', 3, 15], ['0194', 3, 12], ['3666', 1, undefined]]],
-    [2, '하체 · 스쿼트', [['0043', 3, 8], ['0085', 3, 10], ['0739', 3, 12], ['0599', 3, 12], ['0585', 2, 15], ['0334', 4, 15], ['0594', 3, 15], ['0472', 3, 12], ['3666', 1, undefined]]],
+    [2, '하체 · 스쿼트', [['0043', 3, 8], ['0085', 3, 10], ['0739', 3, 12], ['0599', 3, 12], ['0585', 2, 15], ['0334', 4, 15], ['0594', 3, 15], ['3666', 1, undefined]]],
     [3, '상체 B · 등', [['2330', 4, 10], ['3563', 3, 12], ['0327', 3, 10], ['0861', 3, 12], ['0203', 3, 15], ['0178', 4, 15], ['0447', 3, 10], ['3666', 1, undefined]]],
-    [4, '코어 · 허리', [['0175', 3, 15], ['0857', 3, 10], ['0276', 3, 10], ['0979', 3, 12]]],
     [5, '팔 · 어깨', [['0251', 3, 12], ['0334', 4, 15], ['0031', 3, 10], ['0060', 3, 12], ['0318', 3, 12], ['0602', 3, 15], ['0200', 3, 12], ['0313', 3, 12], ['3666', 1, undefined]]],
   ],
   ppl: [
@@ -45,7 +44,7 @@ const shape = r => r.ex.map(e => [e.id, e.sets, e.reps])
 describe('starter plan catalog', () => {
   it('offers exactly the five plans, G-PLAN’s own first, with the day count read off the schedule', () => {
     expect(starterPlanOptions()).toEqual([
-      { id: 'gplan-solid', days: 5 }, { id: 'ppl', days: 3 }, { id: 'upper-lower', days: 4 },
+      { id: 'gplan-solid', days: 4 }, { id: 'ppl', days: 3 }, { id: 'upper-lower', days: 4 },
       { id: 'full-body', days: 3 }, { id: '5x5', days: 3 },
     ])
     for (const { id, days } of starterPlanOptions()) expect(starterPlanDays(id)).toHaveLength(days)
@@ -111,14 +110,10 @@ const GPLAN_FULL = [
   [['0314', 8, 10, 150, 2, LEFT], ['0577', 8, 10, 120, 0, '손잡이가 가슴 가운데 높이에 오게 의자 조절'], ['0405', 8, 10, 120, 0, LEFT],
     ['0334', 12, 15, 75, 0, SMALL], ['0179', 12, 15, 75, 0, FLY], ['0596', 12, 15, 75, 0, '가슴 펴고, 손잡이를 모은 끝에서 1초 쥐어짜기'], ['0194', 10, 12, 75]],
   [['0043', 6, 8, 180, 2], ['0085', 8, 10, 150, 0, '엉덩이를 뒤로 빼며 허벅지 뒤가 당기는 데까지만 내리기'], ['0739', 10, 12, 120], ['0599', 10, 12, 75],
-    ['0585', 12, 15, 60], ['0334', 12, 15, 60, 0, SMALL], ['0594', 12, 15, 60], ['0472', 10, 12, 60]],
+    ['0585', 12, 15, 60], ['0334', 12, 15, 60, 0, SMALL], ['0594', 12, 15, 60]],
   [['2330', 8, 10, 120, 2], ['3563', 10, 12, 60, 0, '랫 풀어라운드: 벤치를 가로로 놓고 옆으로 앉아, 위·바깥에서 엉덩이 쪽으로 팔을 대각선으로 당기기 · 왼팔부터, 횟수는 한 팔 기준'],
     ['0327', 8, 10, 120, 0, '가슴을 벤치에 대고 — 허리 · 허벅지 뒤는 쉬게'], ['0861', 10, 12, 90], ['0203', 12, 15, 60], ['0178', 12, 15, 60, 0, SMALL],
     ['0447', 8, 10, 75]],
-  [['0175', 12, 15, 60, 0, '무릎 꿇고 로프를 머리 옆에 · 엉덩이는 고정, 갈비뼈를 골반 쪽으로 말기 · 팔로 당기지 않기'],
-    ['0857', 8, 10, 60, 0, '무릎 대고 시작 · 배에 힘 주고 허리가 꺾이기 전까지만 나가기 · 돌아올 때 배로 당기기'],
-    ['0276', 8, 10, 45, 0, '허리를 바닥에 붙인 채 반대쪽 팔다리를 천천히 뻗기 · 숨을 내쉬며 · 횟수는 한쪽 기준'],
-    ['0979', 10, 12, 45, 0, '케이블이나 밴드를 옆에 두고 가슴 앞에서 쭉 밀어 2초 버티기 · 몸이 돌아가지 않게 · 한쪽 기준, 양쪽 다']],
   [['0251', 8, 12, 120, 0, '몸을 앞으로 기울여 아랫가슴 · 어깨가 팔꿈치 아래로 내려가지 않게 · 첫 세트 전 어시스트 딥스로 가볍게 1세트'],
     ['0334', 12, 15, 60, 0, SMALL], ['0031', 8, 10, 90], ['0060', 10, 12, 75], ['0318', 10, 12, 75, 0, LEFT],
     ['0602', 12, 15, 60, 0, '팔은 살짝 굽힌 채, 날개뼈 말고 어깨 뒤로 벌리기'], ['0200', 10, 12, 60], ['0313', 10, 12, 60, 0, LEFT]],
@@ -142,13 +137,11 @@ describe('G-PLAN Solid Build, as prescribed', () => {
     }
   })
 
-  // Thursday's core day is the interval-running day, so only the four lifting days walk.
-  const lifting = routines.filter(r => r.name !== '코어 · 허리')
-  it('ends every lifting session with the incline walk, and has no other cardio', () => {
+  const lifting = routines
+  it('ends every session with the incline walk, and has no other cardio', () => {
     const walk = { id: '3666', sets: 1, min: 20, speed: 5, note: '경사 10~12% · 하루 걸음 수 채우기' }
     expect(lifting).toHaveLength(4)
     lifting.forEach(r => expect(r.ex.at(-1)).toEqual(walk))
-    expect(routines.find(r => r.name === '코어 · 허리').ex.some(e => isCardio(e.id))).toBe(false)
     expect(routines.flatMap(r => r.ex.slice(0, -1)).filter(e => isCardio(e.id)).length).toBe(0)
   })
 
@@ -174,7 +167,7 @@ describe('G-PLAN Solid Build, as prescribed', () => {
   it('has one leg day, 12 sets each for biceps and triceps, chest twice, and never a group two days running', () => {
     const { routines, schedule } = buildStarterPlan('gplan-solid')
     const dayOf = Object.fromEntries(schedule.map(({ day, routineId }) => [routineId, day]))
-    expect(schedule.map(({ day }) => day)).toEqual([1, 2, 3, 4, 5])   // Mon–Fri, Thursday short: the weekend off
+    expect(schedule.map(({ day }) => day)).toEqual([1, 2, 3, 5])   // Mon, Tue, Wed, Fri: the weekend off
     // The day after the legs loads neither the hamstrings nor a bent-over lower back.
     const wednesday = routines.find(r => dayOf[r.id] === 3)
     expect(wednesday.ex.some(e => EXIDX[e.id].bp === 'upper legs' || ['0027', '0085'].includes(e.id))).toBe(false)
@@ -186,7 +179,7 @@ describe('G-PLAN Solid Build, as prescribed', () => {
     // Dips are filed under the chest but load the triceps as hard, so they count for both.
     const DIP = '0251'
     const works = muscle => e => EXIDX[e.id].tg === muscle || (muscle === 'triceps' && e.id === DIP)
-    const WEEKLY = { biceps: 12, triceps: 12, pectorals: 16, abs: 15 }
+    const WEEKLY = { biceps: 12, triceps: 12, pectorals: 16 }
     for (const muscle of Object.keys(WEEKLY)) {
       const sets = routines.flatMap(r => r.ex).filter(works(muscle)).reduce((n, e) => n + e.sets, 0)
       expect(sets, muscle).toBe(WEEKLY[muscle])
@@ -194,13 +187,9 @@ describe('G-PLAN Solid Build, as prescribed', () => {
     }
   })
 
-  // A smaller waist comes from the cut (the user asked for waist work, 2026-10-30). The core day
-  // trains the deep core and the abs, and the obliques only against rotation: a loaded side bend
-  // or twist would thicken the waist.
-  it('keeps waist-thickening oblique work out of the plan', () => {
-    for (const e of routines.flatMap(r => r.ex)) expect(EXIDX[e.id].n, e.id).not.toMatch(/side bend|twist|oblique|russian/)
-    const core = routines.find(r => r.name === '코어 · 허리')
-    expect(core.ex.every(e => EXIDX[e.id].tg === 'abs')).toBe(true)
+  // The user does their own ab work (2026-10-30), so the plan carries none.
+  it('leaves the abs to the user', () => {
+    expect(routines.flatMap(r => r.ex).filter(e => EXIDX[e.id].tg === 'abs').map(e => e.id)).toEqual([])
   })
 
   // Started and finished the way the app does it (beginWorkout → buildCombinedEntries, the finish
