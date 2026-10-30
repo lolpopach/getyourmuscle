@@ -33,7 +33,9 @@ const FIVE_BY_FIVE = [
 ]
 
 // G-PLAN's own plan (docs/dev/GETYOURMUSCLE_PLAN.md §2.4.0): a lean, solid build while cutting
-// slowly — side delts, upper chest, back and arms first. Four days: chest and shoulders, a leg
+// slowly. The goal above all is broad shoulders and a wide frame (the user, 2026-10-30), so the
+// side delts and the lats come first: laterals on every training day, early in the session on
+// Monday and Friday, and a lat-only straight-arm pulldown beside the pulldown. Four days: chest and shoulders, a leg
 // day, back, and a day for arms, with the weekend free for football. Written out in full, the
 // way the plan prescribes it, so a loaded routine needs no editing before the first session:
 //   - a rep range per exercise under double progression (the routine's `prog`): reps climb to
@@ -52,8 +54,9 @@ const FIVE_BY_FIVE = [
 // football, and the arm day on Friday, so Monday starts after two days off (both their calls).
 // The back day follows the leg day, so its row is chest-supported: sore hamstrings and lower back
 // stay out of it. Biceps Wednesday and Friday, triceps and chest Monday and Friday, so nothing is
-// trained two days running. Weekly sets: chest 16 (Monday 13, upper 7), biceps 12, triceps 12
-// counting dips, quads 8, hamstrings 6, side delts 12, rear delts 6, back 10.
+// trained two days running. Weekly sets: side delts 16, lats 7 (back 13 with the rows), rear
+// delts 6, chest 16 (Monday 13, upper 7), biceps 12, triceps 12 counting dips, quads 8,
+// hamstrings 6.
 const LEFT_SETS = '왼팔이 멈추면 그 세트는 끝'
 const SMALL_LAST = '반동 없이 · 마지막 세트는 실패 직전까지'
 // [id, sets, [bottom, top], rest seconds, extra fields]
@@ -66,9 +69,9 @@ const GPLAN_SOLID = [
     lift('0314', 4, [8, 10], 150, { ...first, note: LEFT_SETS }),   // dumbbell incline press
     lift('0577', 3, [8, 10], 120, { note: '손잡이가 가슴 가운데 높이에 오게 의자 조절' }),  // machine chest press
     lift('0405', 3, [8, 10], 120, { note: LEFT_SETS }),             // seated dumbbell shoulder press
+    lift('0334', 4, [12, 15], 75, { note: SMALL_LAST }),            // dumbbell lateral raise
     lift('0179', 3, [12, 15], 75, { note: '아래에서 위로 — 윗가슴' }),  // low-to-high cable fly
     lift('0596', 3, [12, 15], 75, { note: '가슴 펴고, 손잡이를 모은 끝에서 1초 쥐어짜기' }),  // pec deck (chest fly machine)
-    lift('0334', 3, [12, 15], 75, { note: SMALL_LAST }),            // dumbbell lateral raise
     lift('0194', 3, [10, 12], 75),                                  // overhead rope triceps extension
     inclineWalk
   ]],
@@ -81,17 +84,18 @@ const GPLAN_SOLID = [
     lift('0739', 3, [10, 12], 120),                                 // leg press
     lift('0599', 3, [10, 12], 75),                                  // seated leg curl
     lift('0585', 2, [12, 15], 60),                                  // leg extension
-    lift('0334', 3, [12, 15], 60, { note: SMALL_LAST }),            // dumbbell lateral raise
+    lift('0334', 4, [12, 15], 60, { note: SMALL_LAST }),            // dumbbell lateral raise
     lift('0594', 3, [12, 15], 60),                                  // seated calf raise
     lift('0472', 3, [10, 12], 60),                                  // hanging leg raise
     inclineWalk
   ]],
   ['g-upper-b', '상체 B · 등', 'pullup', [
     lift('2330', 4, [8, 10], 120, first),                           // lat pulldown
+    lift('0238', 3, [12, 15], 60, { note: '팔꿈치 거의 편 채로 허벅지까지 — 광배로만 당기기' }),  // straight-arm pulldown
     lift('0327', 3, [8, 10], 120, { note: '가슴을 벤치에 대고 — 허리 · 허벅지 뒤는 쉬게' }),  // chest-supported dumbbell row
     lift('0861', 3, [10, 12], 90),                                  // seated cable row
     lift('0203', 3, [12, 15], 60),                                  // face pull (rope rear-delt row)
-    lift('0178', 3, [12, 15], 60, { note: SMALL_LAST }),            // cable lateral raise
+    lift('0178', 4, [12, 15], 60, { note: SMALL_LAST }),            // cable lateral raise
     lift('0447', 3, [8, 10], 75),                                   // EZ-bar curl
     inclineWalk
   ]],
@@ -99,10 +103,10 @@ const GPLAN_SOLID = [
   // week. Then biceps and triceps take turns, so each rests while the other works.
   ['g-arms', '팔 · 어깨', 'arm', [
     lift('0251', 3, [8, 12], 120, { note: '몸을 앞으로 기울여 아랫가슴 · 어깨가 팔꿈치 아래로 내려가지 않게 · 첫 세트 전 어시스트 딥스로 가볍게 1세트' }),  // chest dip
+    lift('0334', 4, [12, 15], 60, { note: SMALL_LAST }),            // dumbbell lateral raise
     lift('0031', 3, [8, 10], 90),                                   // barbell curl
     lift('0060', 3, [10, 12], 75),                                  // skull crusher
     lift('0318', 3, [10, 12], 75, { note: LEFT_SETS }),             // incline dumbbell curl
-    lift('0334', 3, [12, 15], 60, { note: SMALL_LAST }),            // dumbbell lateral raise
     lift('0602', 3, [12, 15], 60, { note: '팔은 살짝 굽힌 채, 날개뼈 말고 어깨 뒤로 벌리기' }),  // reverse pec deck
     lift('0200', 3, [10, 12], 60),                                  // rope pushdown
     lift('0313', 3, [10, 12], 60, { note: LEFT_SETS }),             // dumbbell hammer curl
