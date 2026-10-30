@@ -33,8 +33,8 @@ const FIVE_BY_FIVE = [
 ]
 
 // G-PLAN's own plan (docs/dev/GETYOURMUSCLE_PLAN.md §2.4.0): a lean, solid build while cutting
-// slowly — side delts, upper chest, back and arms first, and the legs growing too. Five days:
-// chest and shoulders, back, two leg days and a day for arms. Written out in full, the way the
+// slowly — side delts, upper chest, back and arms first. Four days: chest and shoulders, a leg
+// day, back, and a day for arms. Written out in full, the way the
 // plan prescribes it, so a loaded routine needs no editing before the first session:
 //   - a rep range per exercise under double progression (the routine's `prog`): reps climb to
 //     the top of the range at one weight, then the weight goes up and reps go back to the bottom
@@ -42,15 +42,16 @@ const FIVE_BY_FIVE = [
 //   - two warm-up sets on each day's first lift (Saturday's dips are bodyweight: its note says
 //     how to warm up instead)
 //   - the plan's cues as notes (the left arm is ~5 % smaller, so it sets the reps)
-//   - the incline treadmill walk after weights on the four weekdays, toward the day's steps
+//   - the incline treadmill walk after weights on the three weekdays, toward the day's steps
 //   - the gym's machines where they do the job as well: a chest press for the flat press, the
 //     pec deck for a second fly, a reverse pec deck for the rear delts (Advanced Fitness,
 //     2026-10-27)
 // Monday is the chest day (the user's call: the presses and both flies together), with
-// Saturday's dips as the chest's second day. The leg days are Tuesday and Friday, biceps
-// Thursday and Saturday, triceps and chest Monday and Saturday, so nothing is trained two days
-// running. Weekly sets: chest 16 (Monday 13, upper 7), biceps 12, triceps 12 counting dips,
-// quads 14, hamstrings 9, side delts 12, rear delts 6, back 10.
+// Saturday's dips as the chest's second day. One leg day, on Tuesday: two left the user too sore
+// for the upper-body days (2026-10-30). Biceps Thursday and Saturday, triceps and chest Monday
+// and Saturday, so nothing is trained two days running. Weekly sets: chest 16 (Monday 13,
+// upper 7), biceps 12, triceps 12 counting dips, quads 8, hamstrings 6, side delts 12, rear
+// delts 6, back 10.
 const LEFT_SETS = '왼팔이 멈추면 그 세트는 끝'
 const SMALL_LAST = '반동 없이 · 마지막 세트는 실패 직전까지'
 // [id, sets, [bottom, top], rest seconds, extra fields]
@@ -69,12 +70,16 @@ const GPLAN_SOLID = [
     lift('0194', 3, [10, 12], 75),                                  // overhead rope triceps extension
     inclineWalk
   ]],
-  // Squat day: the quads first, a hinge for the hamstrings.
-  ['g-lower-a', '하체 A · 스쿼트', 'legs', [
-    lift('0043', 4, [6, 8], 180, first),                            // barbell squat
-    lift('0085', 3, [8, 10], 150),                                  // Romanian deadlift
-    lift('0739', 2, [10, 12], 120),                                 // leg press
-    lift('0586', 3, [10, 12], 75),                                  // lying leg curl
+  // The one leg day: squat, hinge, press, curl and extension, 3 sets for the big lifts — enough to
+  // keep and slowly build the legs through the cut without a week of soreness. The seated curl
+  // trains the hamstrings at a long length; the laterals ride along for the side delts.
+  ['g-lower', '하체 · 스쿼트', 'legs', [
+    lift('0043', 3, [6, 8], 180, first),                            // barbell squat
+    lift('0085', 3, [8, 10], 150, { note: '엉덩이를 뒤로 빼며 허벅지 뒤가 당기는 데까지만 내리기' }),  // Romanian deadlift
+    lift('0739', 3, [10, 12], 120),                                 // leg press
+    lift('0599', 3, [10, 12], 75),                                  // seated leg curl
+    lift('0585', 2, [12, 15], 60),                                  // leg extension
+    lift('0334', 3, [12, 15], 60, { note: SMALL_LAST }),            // dumbbell lateral raise
     lift('0594', 3, [12, 15], 60),                                  // seated calf raise
     lift('0472', 3, [10, 12], 60),                                  // hanging leg raise
     inclineWalk
@@ -86,18 +91,6 @@ const GPLAN_SOLID = [
     lift('0203', 3, [12, 15], 60),                                  // face pull (rope rear-delt row)
     lift('0178', 3, [12, 15], 60, { note: SMALL_LAST }),            // cable lateral raise
     lift('0447', 3, [8, 10], 75),                                   // EZ-bar curl
-    inclineWalk
-  ]],
-  // Single-leg and machine work, so the second leg day adds volume without a second heavy squat.
-  // The seated curl trains the hamstrings at a longer length than Tuesday's lying one.
-  ['g-lower-b', '하체 B · 레그프레스', 'legs', [
-    lift('0410', 3, [8, 10], 120, { ...first, note: '다리마다 · 왼다리부터, 오른다리는 같은 횟수까지' }),  // split squat
-    lift('0739', 3, [10, 12], 120),                                 // leg press
-    lift('0599', 3, [10, 12], 75),                                  // seated leg curl
-    lift('0585', 2, [12, 15], 60),                                  // leg extension
-    lift('0334', 3, [12, 15], 60, { note: SMALL_LAST }),            // dumbbell lateral raise
-    lift('0605', 3, [12, 15], 60),                                  // standing calf raise
-    lift('0175', 3, [12, 15], 60),                                  // cable crunch
     inclineWalk
   ]],
   // Dips open it: the lower chest and the triceps in one lift, and the chest's second day of the
@@ -118,7 +111,7 @@ const GPLAN_SOLID = [
 // [weekday, routineKey] — weekday is a DAYN index, so 1 is Monday. Fixed weeks only: every
 // plan repeats the same seven days, which is all the weekly plan model can represent.
 const PLANS = {
-  'gplan-solid': { routines: GPLAN_SOLID, routine: { prog: 'double' }, schedule: [[1, 'g-upper-a'], [2, 'g-lower-a'], [4, 'g-upper-b'], [5, 'g-lower-b'], [6, 'g-arms']] },
+  'gplan-solid': { routines: GPLAN_SOLID, routine: { prog: 'double' }, schedule: [[1, 'g-upper-a'], [2, 'g-lower'], [4, 'g-upper-b'], [6, 'g-arms']] },
   ppl: { routines: PPL, schedule: [[1, 'push'], [3, 'pull'], [5, 'legs']] },
   'upper-lower': { routines: UPPER_LOWER, schedule: [[1, 'upper-a'], [2, 'lower-a'], [4, 'upper-b'], [5, 'lower-b']] },
   'full-body': { routines: FULL_BODY, schedule: [[1, 'fb-a'], [3, 'fb-b'], [5, 'fb-c']] },
