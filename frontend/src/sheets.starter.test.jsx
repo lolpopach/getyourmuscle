@@ -119,10 +119,10 @@ describe('loadStarterPlan', () => {
     expect(second.some(id => first.includes(id))).toBe(false)
   })
 
-  it('puts G-PLAN’s routine on Monday, Tuesday, Thursday and Friday, ready to train', () => {
+  it('puts G-PLAN’s routine on Monday, Tuesday, Wednesday and Friday, ready to train', () => {
     expect(loadStarterPlan('gplan-solid')).toBe(true)
     expect([1, 2, 3, 4, 5, 6, 0].map(nameOn)).toEqual(
-      ['상체 A · 가슴 어깨', '상체 B · 등', undefined, '하체 · 스쿼트', '팔 · 어깨', undefined, undefined])
+      ['상체 A · 가슴 어깨', '하체 · 스쿼트', '상체 B · 등', undefined, '팔 · 어깨', undefined, undefined])
     const added = S().routines.slice(1)
     expect(added.every(r => r.prog === 'double')).toBe(true)
     expect(added[0].ex[0]).toMatchObject({ id: '0314', sets: 4, repsMin: 8, reps: 10, restSec: 150, warmupSets: 2 })

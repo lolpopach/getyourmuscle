@@ -12,8 +12,8 @@ const APPROVED = {
   // [id, sets, reps] here; the rest of G-PLAN's prescription is pinned in its own block below.
   'gplan-solid': [
     [1, '상체 A · 가슴 어깨', [['0314', 4, 10], ['0577', 3, 10], ['0405', 3, 10], ['0179', 3, 15], ['0596', 3, 15], ['0334', 3, 15], ['0194', 3, 12], ['3666', 1, undefined]]],
-    [2, '상체 B · 등', [['2330', 4, 10], ['0027', 3, 10], ['0861', 3, 12], ['0203', 3, 15], ['0178', 3, 15], ['0447', 3, 10], ['3666', 1, undefined]]],
-    [4, '하체 · 스쿼트', [['0043', 3, 8], ['0085', 3, 10], ['0739', 3, 12], ['0599', 3, 12], ['0585', 2, 15], ['0334', 3, 15], ['0594', 3, 15], ['0472', 3, 12], ['3666', 1, undefined]]],
+    [2, '하체 · 스쿼트', [['0043', 3, 8], ['0085', 3, 10], ['0739', 3, 12], ['0599', 3, 12], ['0585', 2, 15], ['0334', 3, 15], ['0594', 3, 15], ['0472', 3, 12], ['3666', 1, undefined]]],
+    [3, '상체 B · 등', [['2330', 4, 10], ['0327', 3, 10], ['0861', 3, 12], ['0203', 3, 15], ['0178', 3, 15], ['0447', 3, 10], ['3666', 1, undefined]]],
     [5, '팔 · 어깨', [['0251', 3, 12], ['0031', 3, 10], ['0060', 3, 12], ['0318', 3, 12], ['0334', 3, 15], ['0602', 3, 15], ['0200', 3, 12], ['0313', 3, 12], ['3666', 1, undefined]]],
   ],
   ppl: [
@@ -109,10 +109,10 @@ const FLY = '아래에서 위로 — 윗가슴'
 const GPLAN_FULL = [
   [['0314', 8, 10, 150, 2, LEFT], ['0577', 8, 10, 120, 0, '손잡이가 가슴 가운데 높이에 오게 의자 조절'], ['0405', 8, 10, 120, 0, LEFT],
     ['0179', 12, 15, 75, 0, FLY], ['0596', 12, 15, 75, 0, '가슴 펴고, 손잡이를 모은 끝에서 1초 쥐어짜기'], ['0334', 12, 15, 75, 0, SMALL], ['0194', 10, 12, 75]],
-  [['2330', 8, 10, 120, 2], ['0027', 8, 10, 150], ['0861', 10, 12, 90], ['0203', 12, 15, 60], ['0178', 12, 15, 60, 0, SMALL],
-    ['0447', 8, 10, 75]],
   [['0043', 6, 8, 180, 2], ['0085', 8, 10, 150, 0, '엉덩이를 뒤로 빼며 허벅지 뒤가 당기는 데까지만 내리기'], ['0739', 10, 12, 120], ['0599', 10, 12, 75],
     ['0585', 12, 15, 60], ['0334', 12, 15, 60, 0, SMALL], ['0594', 12, 15, 60], ['0472', 10, 12, 60]],
+  [['2330', 8, 10, 120, 2], ['0327', 8, 10, 120, 0, '가슴을 벤치에 대고 — 허리 · 허벅지 뒤는 쉬게'], ['0861', 10, 12, 90], ['0203', 12, 15, 60], ['0178', 12, 15, 60, 0, SMALL],
+    ['0447', 8, 10, 75]],
   [['0251', 8, 12, 120, 0, '몸을 앞으로 기울여 아랫가슴 · 어깨가 팔꿈치 아래로 내려가지 않게 · 첫 세트 전 어시스트 딥스로 가볍게 1세트'],
     ['0031', 8, 10, 90], ['0060', 10, 12, 75], ['0318', 10, 12, 75, 0, LEFT], ['0334', 12, 15, 60, 0, SMALL],
     ['0602', 12, 15, 60, 0, '팔은 살짝 굽힌 채, 날개뼈 말고 어깨 뒤로 벌리기'], ['0200', 10, 12, 60], ['0313', 10, 12, 60, 0, LEFT]],
@@ -143,13 +143,17 @@ describe('G-PLAN Solid Build, as prescribed', () => {
   })
 
   // More arms (the user's ask, 2026-10-27), and one leg day: two left them too sore for the
-  // upper-body days (2026-10-30), with the arm day on Friday so Monday follows two days off.
+  // upper-body days (2026-10-30), on Tuesday so the legs are fresh for weekend football, and the
+  // arm day on Friday so Monday follows two days off.
   // 12 sets each for biceps and triceps, and no muscle group trained two days running, so each
   // one comes to its next session recovered.
   it('has one leg day, 12 sets each for biceps and triceps, chest twice, and never a group two days running', () => {
     const { routines, schedule } = buildStarterPlan('gplan-solid')
     const dayOf = Object.fromEntries(schedule.map(({ day, routineId }) => [routineId, day]))
-    expect(schedule.map(({ day }) => day)).toEqual([1, 2, 4, 5])   // Mon, Tue, Thu, Fri: the weekend off
+    expect(schedule.map(({ day }) => day)).toEqual([1, 2, 3, 5])   // Mon, Tue, Wed, Fri: the weekend off
+    // The day after the legs loads neither the hamstrings nor a bent-over lower back.
+    const wednesday = routines.find(r => dayOf[r.id] === 3)
+    expect(wednesday.ex.some(e => EXIDX[e.id].bp === 'upper legs' || ['0027', '0085'].includes(e.id))).toBe(false)
     const legDays = routines.filter(r => r.ex.some(e => EXIDX[e.id].bp === 'upper legs'))
     expect(legDays.map(r => r.name)).toEqual(['하체 · 스쿼트'])
     const daysWith = has => routines.filter(r => r.ex.some(has)).map(r => dayOf[r.id]).sort((a, b) => a - b)
