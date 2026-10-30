@@ -55,7 +55,7 @@ describe('starter plan chooser', () => {
     expect([...host.querySelectorAll('.item .tt')].map(el => el.textContent))
       .toEqual(['G-PLAN Solid Build', 'Push / Pull / Legs', 'Upper / Lower', 'Full Body', '5×5'])
     expect(rowFor(host, 'Upper / Lower').querySelector('.ss').textContent).toContain('4 days per week')
-    expect(rowFor(host, 'G-PLAN Solid Build').querySelector('.ss').textContent).toContain('5 days per week')
+    expect(rowFor(host, 'G-PLAN Solid Build').querySelector('.ss').textContent).toContain('4 days per week')
   })
 
   it('loads straight away when the plan’s weekdays are free, without asking', () => {
@@ -119,10 +119,10 @@ describe('loadStarterPlan', () => {
     expect(second.some(id => first.includes(id))).toBe(false)
   })
 
-  it('puts G-PLAN’s routine on Monday, Tuesday, Thursday, Friday and Saturday, ready to train', () => {
+  it('puts G-PLAN’s routine on Monday, Tuesday, Wednesday and Friday, ready to train', () => {
     expect(loadStarterPlan('gplan-solid')).toBe(true)
     expect([1, 2, 3, 4, 5, 6, 0].map(nameOn)).toEqual(
-      ['상체 A · 가슴 어깨', '하체 A · 스쿼트', undefined, '상체 B · 등', '하체 B · 레그프레스', '팔 · 어깨', undefined])
+      ['상체 A · 가슴 어깨', '하체 · 스쿼트', '상체 B · 등', undefined, '팔 · 어깨', undefined, undefined])
     const added = S().routines.slice(1)
     expect(added.every(r => r.prog === 'double')).toBe(true)
     expect(added[0].ex[0]).toMatchObject({ id: '0314', sets: 4, repsMin: 8, reps: 10, restSec: 150, warmupSets: 2 })
