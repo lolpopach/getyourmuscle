@@ -48,15 +48,13 @@ const FIVE_BY_FIVE = [
 //
 // The user's choices, in the order they came:
 //   - Width above all — broad shoulders and a wide frame. The side delts and the lats come
-//     first: a lateral raise on every lifting day, early on Monday and Friday, and a lat
-//     pullaround beside the pulldown (one arm on a diagonal from high and wide down to the hip,
-//     along the lat fibres; one side at a time, so the smaller left side sets the reps). The
-//     catalogue has no pullaround, so it is logged as the one-arm cable pulldown and its note
-//     says how it is done.
+//     first: a lateral raise on every lifting day, early on Monday and Friday, and two lat
+//     pulldowns on Wednesday — wide grip for width, parallel grip for the stretch.
 //   - Monday is the chest day (both presses and both flies); Friday's dips are its second day.
 //   - One leg day: two left the user too sore for the other days. On Tuesday, so the legs are
-//     recovered for weekend football; the back day after it uses a chest-supported row, so sore
-//     hamstrings and lower back stay out of it.
+//     recovered for weekend football; the back day after it rows chest-supported or braced on a
+//     bench, so sore hamstrings and lower back stay out of it.
+//   - The back day uses lifts the user knows, the best-proven ones, and one cable station only.
 //   - The arm day on Friday, so Monday follows two days off.
 //   - Abs are the user's own: the plan carries no ab work (the waist comes from the cut; the plan
 //     doc keeps the ab technique for reference).
@@ -94,13 +92,18 @@ const GPLAN_SOLID = [
     lift('0594', 3, [12, 15], 60),                                  // seated calf raise
     inclineWalk
   ]],
+  // Back, rebuilt around the best-proven lifts the user knows (2026-11-06), with one cable
+  // station only: the lat pulldown, its handle swapped between the two pulldowns. Wide grip for
+  // width, the parallel grip for the full stretch, a chest-supported T-bar row for thickness (no
+  // lower back or hamstrings the day after legs), a one-arm dumbbell row braced on the bench, and
+  // the delts and biceps on dumbbells and the machine.
   ['g-upper-b', '상체 B · 등', 'pullup', [
-    lift('2330', 4, [8, 10], 120, first),                           // lat pulldown
-    lift('3563', 3, [10, 12], 60, { note: '랫 풀어라운드: 벤치를 가로로 놓고 옆으로 앉아, 위·바깥에서 엉덩이 쪽으로 팔을 대각선으로 당기기 · 왼팔부터, 횟수는 한 팔 기준' }),  // lat pullaround: one-arm cable pulldown, seated sideways, pulled on a diagonal
-    lift('0327', 3, [8, 10], 120, { note: '가슴을 벤치에 대고 — 허리 · 허벅지 뒤는 쉬게' }),  // chest-supported dumbbell row
-    lift('0861', 3, [10, 12], 90),                                  // seated cable row
-    lift('0203', 3, [12, 15], 60),                                  // face pull (rope rear-delt row)
-    lift('0178', 4, [12, 15], 60, { note: SMALL_LAST }),            // cable lateral raise
+    lift('2330', 4, [8, 10], 120, { ...first, note: '와이드 그립: 손은 어깨보다 한 뼘씩 넓게 · 가슴을 들고 바를 쇄골 쪽으로 · 팔꿈치를 옆구리로 끌어내리기' }),  // wide-grip lat pulldown
+    lift('0818', 3, [10, 12], 90, { note: '같은 기구에서 패럴렐(V) 손잡이로 바꾸기 · 맨 위에서 광배를 쭉 늘리고 팔꿈치를 엉덩이 쪽으로' }),  // parallel-grip lat pulldown
+    lift('0606', 3, [8, 10], 120, { note: '가슴을 패드에 대고 · 날개뼈를 모으며 팔꿈치를 뒤로 · 기구가 없으면 체스트 서포트 머신 로우' }),  // chest-supported T-bar row
+    lift('0292', 3, [10, 12], 75, { note: '벤치에 한 손과 한 무릎을 대고 · 팔꿈치를 엉덩이 쪽으로 · 왼팔부터, 횟수는 한 팔 기준' }),  // one-arm dumbbell row
+    lift('0334', 4, [12, 15], 60, { note: SMALL_LAST }),            // dumbbell lateral raise
+    lift('0602', 3, [12, 15], 60, { note: '팔은 살짝 굽힌 채, 날개뼈 말고 어깨 뒤로 벌리기' }),  // reverse pec deck
     lift('0447', 3, [8, 10], 75),                                   // EZ-bar curl
     inclineWalk
   ]],
